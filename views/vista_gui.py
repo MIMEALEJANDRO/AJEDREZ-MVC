@@ -353,8 +353,13 @@ class VistaGUI(InterfazVista):
         ``itemconfigure`` para no tocar lo que no cambia, pero a 64 casillas el
         coste es despreciable y el código queda la mitad de corto: en cada
         jugada cambia el tablero entero, no un cuadrado suelto.
+
+        El borrado es ``delete("all")`` porque en un canvas de Tk todos los
+        elementos pertenecen a la etiqueta "all"; ``delete("todo")`` no borra
+        nada, porque "todo" no es una etiqueta que exista, y el tablero se
+        acabaría apilando sobre el anterior.
         """
-        self.lienzo.delete("todo")
+        self.lienzo.delete("all")
         fuente = self._fuente_de_piezas()
         # La fila 0 del modelo es la primera (las blancas abajo) y en pantalla
         # va abajo, así que se invierte al pintar. Es el mismo criterio que usa

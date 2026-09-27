@@ -240,14 +240,37 @@ class PartidaController:
     # Jugadas
     # ------------------------------------------------------------------
 
-    def introducir_jugada(self) -> None:
-        """Pide una jugada por texto, la interpreta y la intenta aplicar.
+    def introducir_jugada(self) -> bool:
+        """Pide una jugada y la intenta aplicar.
 
-        Devuelve ``True`` si la jugada se aceptó. Ese valor lo usan las
-        pruebas para comprobar el resultado sin mirar lo impreso, y no tiene
-        otro uso en el programa: el bucle vuelve a pintar el tablero igual.
+        Es un atajo de ``aplicar_jugada``: pregunta con ``pedir_jugada`` y le
+        pasa el texto. Existe aparte porque es lo que usan la consola y
+        ``VistaGUI``, las dos vistas que leen de la persona.
+
+        Devuelve ``True`` si la jugada se aceptó. Ese valor lo usan las pruebas
+        para comprobar el resultado sin mirar lo impreso, y no tiene otro uso en
+        el programa: el bucle vuelve a pintar el tablero igual.
         """
-        texto = self.vista.pedir_jugada()
+        return self.aplicar_jugada(self.vista.pedir_jugada())
+
+    def aplicar_jugada(self, texto: str) -> bool:
+        """Interpreta un texto de jugada y la intenta aplicar.
+
+        Todo el trabajo de ``introducir_jugada`` está aquí, y separado de la
+        pregunta a propósito. La razón es que hay dos formas muy distintas de
+        tener una jugada en la mano:
+
+        * La consola y la ventana de diálogos **preguntan** y reciben un texto
+          (``introducir_jugada``).
+        * Una ventana con botones de verdad **no pregunta**: quien la usa ya ha
+          hecho clic en dos casillas, y la jugada llega montada.
+
+        Sin este método, la segunda forma no tendría por dónde entrar: la única
+        puerta pública pediría el texto, y hacerlo significaría volver a un
+        diálogo. Con él, la ventana llama a ``aplicar_jugada("e2e4")`` y no
+        bloquea, y las dos formas comparten **la misma** validación, la misma
+        traducción de errores y la misma comprobación de turno.
+        """
         if not texto:
             return False
 
