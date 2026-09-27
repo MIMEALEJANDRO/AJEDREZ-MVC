@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+# `pythonpath = ["."]` es lo que permite que las pruebas hagan
+# `from models import Partida` sin instalar el proyecto. Sin esta línea,
+# pytest buscaría los módulos en la carpeta de la prueba y no en la raíz.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+# Se muestran los nombres de las pruebas parametrizadas (las de JSON y FEN se
+# repetirían como "test_x[0]" y "test_x[1]", que no dice nada).
+addopts = "-v"

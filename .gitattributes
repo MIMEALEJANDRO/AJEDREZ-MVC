@@ -1,0 +1,21 @@
+# Se declara el fin de línea de cada tipo de archivo para que el repositorio
+# guarde siempre el mismo contenido, da igual desde qué sistema se suba. Sin
+# esto, Windows y macOS/Linux se pelean: cada commit de uno reescribe todos los
+# ficheros del otro, y el historial se llena de cambios que no existen.
+* text=auto eol=lf
+
+# Los ficheros de Windows que deben llevar CRLF de verdad.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Los binarios no se tocan: un "fin de línea" en un PNG lo rompe.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Los datos que genera el programa son de quien lo usa, no del proyecto.
+data/partidas.json  linguist-generated=true
+data/partidas.json.tmp linguist-generated=true
+data/fen/          linguist-generated=true

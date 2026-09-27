@@ -1,0 +1,6 @@
+Este archivo está para que la carpeta siga existiendo en un clon nuevo del
+proyecto. El programa crea esta carpeta solo si falta, así que en realidad no
+es necesaria: está aquí por si alguien decide versionar una partida de ejemplo
+para probar la carga.
+
+La carpeta `fen/` se crea sola la primera vez que se elige el formato FEN.

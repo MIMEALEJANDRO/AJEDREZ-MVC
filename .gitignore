@@ -1,0 +1,16 @@
+# Byte-compiled Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Datos generados por el programa: las partidas guardadas son datos del
+# usuario, no del proyecto, así que no se versionan (y `data/` se conserva
+# con un .gitkeep para que la carpeta exista en un clon nuevo).
+data/partidas.json
+data/partidas.json.tmp
+data/fen/

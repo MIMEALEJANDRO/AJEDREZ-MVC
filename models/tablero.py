@@ -1,0 +1,599 @@
+"""El tablero: qué hay en cada casilla y qué se puede hacer con ello.
+
+Este módulo concentra TODA la lógica de las reglas de movimiento:
+
+* cómo se mueve cada tipo de pieza (salto, deslizamiento, peón, enroque),
+* qué casillas threaten las piezas de un color,
+* si un rey queda en jaque,
+* la legality de una jugada (simulándola sobre una copia del tablero),
+* la ejecución de la jugada, incluidas las tres reglas especiales
+  (enroque, captura al paso y promoción),
+* la lectura y escritura en FEN.
+
+Decisiones de diseño importantes para la revisión:
+
+1. ``_piezas`` es un diccionario ``{Posicion: Pieza}``. Con las 64 casillas
+   siempre presentes, un diccionario es más simple y más rápido que una
+   matriz con ``None``, y además ``Posicion`` ya es hashable.
+2. ``clonar()`` copia el tablero entero. La legalidad de una jugada se
+   comprueba aplicándola sobre una copia y mirando si el rey propio queda
+   amenazado. Es más lento que un algoritmo optimizado, pero es obviamente
+   correcto y se lee muy bien.
+3. Los enroques se generan *solo* cuando se piden explícitamente
+   (``incluir_enroque=True``). Si se generaran siempre, calcular "casillas
+   atacadas" llamaría a ``esta_en_jaque``, que volvería a llamar a
+   "casillas atacadas": recursión infinita.
+"""
+
+from __future__ import annotations
+
+from models.enums import LETRAS_FEN_INVERSAS, Color, TipoPieza
+from models.errores import ErrorAjedrez, MovimientoIlegal
+from models.pieza import TIPOS_PROMOCION, Pieza
+from models.posicion import (
+    DESPLAZAMIENTOS_CABALLO,
+    DESPLAZAMIENTOS_REY,
+    Movimiento,
+    Posicion,
+)
+
+# Direcciones de las piezas que se desplazan ("deslizan") en línea recta.
+ORTOGONALES = ((0, 1), (1, 0), (0, -1), (-1, 0))
+
+# Direcciones de las piezas que se desplazan en diagonal.
+DIAGONALES = ((1, 1), (1, -1), (-1, -1), (-1, 1))
+
+# Opciones de enroque, en tuplas para no repetir código:
+#   (columna destino, columna de la torre, casillas que deben estar vacías,
+#    casillas del rey que no pueden estar amenazadas)
+#   - corto: e1->g1, torre h1, vacías f1 y g1, camino del rey e1-f1-g1
+#   - largo: e1->c1, torre a1, vacías b1, c1 y d1, camino del rey e1-d1-c1
+OPCIONES_ENROQUE = (
+    (6, 7, (5, 6), (4, 5, 6)),
+    (2, 0, (1, 2, 3), (4, 3, 2)),
+)
+
+# Fila en la que está la primera línea de cada color (la posición inicial).
+FILA_INICIAL_PEONES = {Color.BLANCO: 1, Color.NEGRO: 6}
+
+
+class Tablero:
+    """Tablero de 8x8: piezas, generación de movimientos y detección de jaque."""
+
+    def __init__(
+        self,
+        piezas: dict[Posicion, Pieza] | None = None,
+        derechos_enroque: set[str] | None = None,
+        ultima_jugada: Movimiento | None = None,
+    ) -> None:
+        # Diccionario interno: casilla -> pieza. Se accede siempre a través de
+        # `obtener`/`colocar`/`retirar` para no perder la validación.
+        self._piezas: dict[Posicion, Pieza] = {}
+        # Derechos de enroque que siguen vigentes: "K", "Q" (blancas) y
+        # "k", "q" (negras), igual que en el FEN. Son datos de la partida, no
+        # derivables de las piezas: si la torre se movió y volvió, ya no se
+        # puede enrocar aunque la torre siga en su casilla.
+        self.derechos_enroque: set[str] = set(derechos_enroque or ())
+        # Última jugada jugada: se necesita para la captura al paso.
+        self.ultima_jugada = ultima_jugada
+        for pieza in (piezas or {}).values():
+            self.colocar(pieza)
+
+    # ------------------------------------------------------------------
+    # Constructores
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def posicion_inicial(cls) -> Tablero:
+        """Crea el tablero con la disposición inicial estándar.
+
+        Se construye el diccionario y se pasa al constructor en vez de colocar
+        pieza a pieza, para no disparar la validación de casillas ocupadas
+        32 veces.
+        """
+        piezas: dict[Posicion, Pieza] = {}
+        # Orden de las piezas mayores en la primera fila: torre, caballo,
+        # alfil, dama, rey, alfil, caballo, torre.
+        primera_fila = (
+            (TipoPieza.TORRE, 0),
+            (TipoPieza.CABALLO, 1),
+            (TipoPieza.ALFIL, 2),
+            (TipoPieza.DAMA, 3),
+            (TipoPieza.REY, 4),
+            (TipoPieza.ALFIL, 5),
+            (TipoPieza.CABALLO, 6),
+            (TipoPieza.TORRE, 7),
+        )
+        for color in (Color.BLANCO, Color.NEGRO):
+            fila = 0 if color is Color.BLANCO else 7
+            for tipo, columna in primera_fila:
+                posicion = Posicion(columna, fila)
+                piezas[posicion] = Pieza(color, tipo, posicion)
+            fila_peones = FILA_INICIAL_PEONES[color]
+            for columna in range(8):
+                posicion = Posicion(columna, fila_peones)
+                piezas[posicion] = Pieza(color, TipoPieza.PEON, posicion)
+        return cls(piezas, {"K", "Q", "k", "q"})
+
+    @classmethod
+    def desde_fen(cls, fen: str, derechos_enroque: set[str] | None = None) -> Tablero:
+        """Crea un tablero a partir de la parte de colocación de un FEN.
+
+        Un FEN completo es ``piezas turno enroque al-paso medio-movimiento
+        jugada``; aquí solo se interpreta el primer campo. Los derechos de
+        enroque se reciben aparte porque no se deducen de las piezas.
+        """
+        if not isinstance(fen, str) or not fen.strip():
+            raise ErrorAjedrez("El FEN no puede estar vacío.")
+        colocacion = fen.strip().split(" ")[0]
+        filas = colocacion.split("/")
+        if len(filas) != 8:
+            raise ErrorAjedrez("El FEN debe describir las 8 filas del tablero.")
+        piezas: dict[Posicion, Pieza] = {}
+        # El FEN empieza por la fila 8, así que se recorre la lista al revés.
+        for indice, fila in enumerate(reversed(filas)):
+            columna = 0
+            for simbolo in fila:
+                # Un dígito indica cuántas casillas vacías hay: "3" = tres
+                # casillas vacías antes de la siguiente pieza.
+                if simbolo.isdigit():
+                    columna += int(simbolo)
+                    continue
+                tipo = LETRAS_FEN_INVERSAS.get(simbolo.lower())
+                if tipo is None or columna > 7:
+                    raise ErrorAjedrez(f"Contenido inválido en el FEN: {simbolo!r}.")
+                # Mayúscula = blancas, minúscula = negras.
+                color = Color.BLANCO if simbolo.isupper() else Color.NEGRO
+                posicion = Posicion(columna, indice)
+                piezas[posicion] = Pieza(color, tipo, posicion)
+                columna += 1
+            if columna != 8:
+                raise ErrorAjedrez("Cada fila del FEN debe describir 8 casillas.")
+        return cls(piezas, set(derechos_enroque or ()))
+
+    def clonar(self) -> Tablero:
+        """Copia independiente del tablero, para simular jugadas.
+
+        Se clonan también los derechos de enroque y la última jugada, porque
+        la simulación necesita ver exactamente el mismo estado.
+        """
+        return Tablero(
+            {posicion: pieza.con_posicion(pieza.posicion) for posicion, pieza in self._piezas.items()},
+            set(self.derechos_enroque),
+            self.ultima_jugada,
+        )
+
+    # ------------------------------------------------------------------
+    # Acceso básico al contenido
+    # ------------------------------------------------------------------
+
+    def colocar(self, pieza: Pieza) -> None:
+        """Coloca una pieza en su casilla rechazando casillas ocupadas."""
+        if self.en_juego(pieza.posicion):
+            raise ErrorAjedrez(f"La casilla {pieza.posicion.notacion} ya está ocupada.")
+        self._piezas[pieza.posicion] = pieza
+
+    def retirar(self, posicion: Posicion) -> Pieza | None:
+        """Retira la pieza de una casilla y la devuelve, o ``None`` si estaba vacía."""
+        return self._piezas.pop(posicion, None)
+
+    def obtener(self, posicion: Posicion) -> Pieza | None:
+        """Pieza que ocupa una casilla, o ``None`` si está vacía."""
+        return self._piezas.get(posicion)
+
+    def en_juego(self, posicion: Posicion) -> bool:
+        """Indica si hay alguna pieza en la casilla."""
+        return posicion in self._piezas
+
+    def limpiar(self) -> None:
+        """Vacía el tablero y reinicia los derechos de enroque."""
+        self._piezas.clear()
+        self.derechos_enroque.clear()
+        self.ultima_jugada = None
+
+    def piezas(self, color: Color | None = None) -> list[Pieza]:
+        """Piezas del tablero, filtradas por color si se indica."""
+        return [pieza for pieza in self._piezas.values() if color is None or pieza.color is color]
+
+    def rey_de(self, color: Color) -> Pieza | None:
+        """Rey de un color, o ``None`` si no está en el tablero."""
+        for pieza in self._piezas.values():
+            if pieza.color is color and pieza.tipo is TipoPieza.REY:
+                return pieza
+        return None
+
+    # ------------------------------------------------------------------
+    # Amenazas y jaque
+    # ------------------------------------------------------------------
+
+    def casillas_atacadas_por(self, color: Color) -> set[Posicion]:
+        """Casillas amenazadas por las piezas de un color.
+
+        Se usa el generador de destinos *sin* enroques: un enroque no es un
+        ataque (mueve al rey, no threaten), y además generar enroques aquí
+        produciría recursión infinita.
+
+        Detalle de reglas: una pieza se considera que amenaza una casilla
+        aunque no pueda capturarla porque dejaría a su propio rey en jaque
+        (artículo 3.1.3 de los reglamentos). Por eso aquí no se comprueba la
+        seguridad del rey atacante, solo la geometría.
+        """
+        atacadas: set[Posicion] = set()
+        for pieza in self.piezas(color):
+            atacadas.update(self._destinos_de(pieza))
+        return atacadas
+
+    def es_ataqueada(self, posicion: Posicion, por: Color) -> bool:
+        """Indica si una casilla está amenazada por el color indicado."""
+        return posicion in self.casillas_atacadas_por(por)
+
+    def esta_en_jaque(self, color: Color) -> bool:
+        """Indica si el rey de un color está amenazado."""
+        rey = self.rey_de(color)
+        if rey is None:
+            raise ErrorAjedrez(f"No hay rey {color.value} en el tablero.")
+        return self.es_ataqueada(rey.posicion, color.contrario)
+
+    # ------------------------------------------------------------------
+    # Generación de movimientos
+    # ------------------------------------------------------------------
+
+    def destinos_de(self, posicion: Posicion) -> list[Posicion]:
+        """Destinos geométricos de la pieza en una casilla (pueden ser ilegales)."""
+        pieza = self.obtener(posicion)
+        if pieza is None:
+            return []
+        return self._destinos_de(pieza)
+
+    def movimientos_de(self, posicion: Posicion) -> list[Movimiento]:
+        """Movimientos legales de la pieza que ocupa una casilla.
+
+        Es lo que usa la vista para resaltar a dónde puede ir la pieza que el
+        jugador acaba de seleccionar.
+        """
+        pieza = self.obtener(posicion)
+        if pieza is None:
+            return []
+        candidatos = [
+            Movimiento(posicion, destino)
+            for destino in self._destinos_de(pieza, incluir_enroque=True)
+        ]
+        return [movimiento for movimiento in candidatos if self.es_legal(movimiento)]
+
+    def movimientos_legales(self, color: Color) -> list[Movimiento]:
+        """Todos los movimientos legales disponibles para un color.
+
+        Se usa para validar lo que escribe el jugador y para detectar jaque
+        mate y ahogado (si no hay ningún movimiento legal, la partida terminó).
+        """
+        resultado = []
+        for pieza in self.piezas(color):
+            for destino in self._destinos_de(pieza, incluir_enroque=True):
+                movimiento = Movimiento(pieza.posicion, destino)
+                if self.es_legal(movimiento):
+                    resultado.append(movimiento)
+        return resultado
+
+    def es_legal(self, movimiento: Movimiento) -> bool:
+        """Indica si el movimiento existe y no deja al rey propio en jaque.
+
+        Antes de nada se descarta lo que nunca es una jugada, ni siquiera
+        geométricamente: mover a una casilla vacía desde una casilla vacía,
+        capturar una pieza propia o capturar un rey.
+
+        Después son dos comprobaciones, y las dos hacen falta:
+
+        1. Que el destino esté entre los destinos *geométricos* de la pieza.
+           Sin esto, un peón podría "saltar" tres casillas: al simular la
+           jugada no hay rey en jaque, así que el movimiento se aceptaría.
+           (Cuando quien llama ya ha generado los candidatos con
+           ``_destinos_de`` la comprobación es redundante, pero es el precio
+           de que ``aplicar`` pueda validar por su cuenta.)
+        2. Que al aplicarlo el rey propio no quede amenazado. Es la forma más
+           simple de implementar la regla "no puedes hacer una jugada que te
+           deje en jaque" y cubre de paso los casos difíciles (rayos
+           descubiertos, clavadas, etc.).
+
+        Criterio para la segunda: se aplica el movimiento sobre un *clon* del
+        tablero y se comprueba que el rey propio no quede amenazado.
+        """
+        pieza = self.obtener(movimiento.origen)
+        if pieza is None or movimiento.origen == movimiento.destino:
+            return False
+        objetivo = self.obtener(movimiento.destino)
+        # No se puede capturar una pieza propia.
+        if objetivo is not None and objetivo.color is pieza.color:
+            return False
+        # No se puede capturar un rey. En un juego real la partida ya habría
+        # terminado en jaque mate antes de llegar aquí, así que la jugada ni
+        # siquiera se ofrecería. Se rechaza igualmente para que el modelo no
+        # tenga un camino que produzca una posición imposible (con dos reyes
+        # del mismo color o sin rey) y para que nadie espere ese final.
+        if objetivo is not None and objetivo.tipo is TipoPieza.REY:
+            return False
+        # El destino tiene que ser uno de los que la pieza puede alcanzar. Los
+        # enroques se piden explícitamente porque comproban el jaque propio, y
+        # aquí se está comprobando justo eso.
+        if movimiento.destino not in self._destinos_de(pieza, incluir_enroque=True):
+            return False
+        simulacion = self.clonar()
+        simulacion._aplicar(movimiento)
+        rey = simulacion.rey_de(pieza.color)
+        if rey is None:
+            return False
+        return not simulacion.es_ataqueada(rey.posicion, pieza.color.contrario)
+
+    # ------------------------------------------------------------------
+    # Ejecución de jugadas
+    # ------------------------------------------------------------------
+
+    def aplicar(self, movimiento: Movimiento, promocion: TipoPieza | None = None) -> Pieza | None:
+        """Ejecuta un movimiento legal y devuelve la pieza capturada."""
+        if not self.es_legal(movimiento):
+            raise MovimientoIlegal(f"Movimiento no permitido: {movimiento.notacion}.")
+        return self._aplicar(movimiento, promocion)
+
+    def _aplicar(self, movimiento: Movimiento, promocion: TipoPieza | None = None) -> Pieza | None:
+        """Ejecuta el movimiento sin validar la legalidad.
+
+        Se separa de ``aplicar`` porque las simulaciones de ``es_legal``
+        necesitan ejecutar jugadas que no han sido validadas todavía. El
+        único requisito es que el movimiento sea *geométricamente* posible.
+        """
+        pieza = self.obtener(movimiento.origen)
+        if pieza is None:
+            raise MovimientoIlegal(f"No hay pieza en {movimiento.origen.notacion}.")
+        # La promoción se decide ANTES de retirar el peón: si se comprobara
+        # después, la pieza ya no estaría en el origen y nunca se detectaría.
+        promociona = pieza.tipo is TipoPieza.PEON and movimiento.destino.fila in (0, 7)
+        if promociona and promocion is not None and promocion not in TIPOS_PROMOCION:
+            raise MovimientoIlegal("La promoción debe ser a dama, torre, alfil o caballo.")
+        capturada = self.retirar(movimiento.destino)
+        # Captura al paso: la casilla de destino está vacía y la víctima está
+        # justo al lado, en la fila de la que parte el peón que captura.
+        if capturada is None and self._es_captura_al_paso(pieza, movimiento.destino):
+            capturada = self.retirar(Posicion(movimiento.destino.columna, movimiento.origen.fila))
+        self.retirar(movimiento.origen)
+        tipo = pieza.tipo
+        if promociona:
+            # Sin promoción explícita se promueve a dama (regla por defecto).
+            tipo = promocion if promocion is not None else TipoPieza.DAMA
+        self.colocar(Pieza(pieza.color, tipo, movimiento.destino))
+        # En el enroque el rey y la torre se mueven a la vez.
+        if movimiento.es_enroque and pieza.tipo is TipoPieza.REY:
+            self._desplazar_torre_enroque(movimiento)
+        # Se recuerda la jugada para que el siguiente turno pueda capturar al paso.
+        self.ultima_jugada = movimiento
+        return capturada
+
+    def _desplazar_torre_enroque(self, movimiento: Movimiento) -> None:
+        """Mueve la torre a la casilla correcta al enrocar al rey."""
+        torre = self.retirar(Posicion(7 if movimiento.destino.columna == 6 else 0, movimiento.origen.fila))
+        if torre is None:
+            return
+        columna_destino = 5 if movimiento.destino.columna == 6 else 3
+        self.colocar(torre.con_posicion(Posicion(columna_destino, movimiento.origen.fila)))
+
+    # ------------------------------------------------------------------
+    # Reglas especiales
+    # ------------------------------------------------------------------
+
+    def _es_captura_al_paso(self, pawn: Pieza, destino: Posicion) -> bool:
+        """Indica si un peón puede capturar al paso hacia una casilla diagonal vacía.
+
+        Se puede capturar al paso solo si, inmediatamente antes, el rival movió
+        un peón dos casillas y dejó su peón justo al lado del nuestro. Todas
+        esas condiciones se comprueban aquí:
+
+        1. la casilla destino es la sexta (para blancas) o la tercera (negras),
+        2. el destino es diagonal a la casilla del peón que captura,
+        3. el peón está en la fila inmediatamente anterior a la del destino,
+        4. la última jugada fue un avance de peón de dos casillas,
+        5. ese peón acabó en la casilla contigua a nuestro peón,
+        6. en esa casilla hay efectivamente un peón enemigo.
+        """
+        if self.ultima_jugada is None:
+            return False
+        fila_destino = 5 if pawn.color is Color.BLANCO else 2
+        if destino.fila != fila_destino:
+            return False
+        if abs(destino.columna - pawn.posicion.columna) != 1:
+            return False
+        if abs(destino.fila - pawn.posicion.fila) != 1:
+            return False
+        previa = self.ultima_jugada
+        if abs(previa.destino.fila - previa.origen.fila) != 2:
+            return False
+        casilla_victima = Posicion(destino.columna, pawn.posicion.fila)
+        if previa.destino != casilla_victima:
+            return False
+        victima = self.obtener(casilla_victima)
+        return (
+            victima is not None
+            and victima.tipo is TipoPieza.PEON
+            and victima.color is not pawn.color
+        )
+
+    def _destinos_de(self, pieza: Pieza, incluir_enroque: bool = False) -> list[Posicion]:
+        """Casillas destino de una pieza según su tipo de movimiento.
+
+        Cada tipo de pieza es una estrategia distinta:
+        * peón: avanza recto y captura en diagonal, con casos especiales,
+        * caballo y rey: "saltador" (destinos fijos),
+        * torre y alfil: "deslizador" (repite el paso hasta toparse con algo),
+        * dama: las dos cosas a la vez.
+        """
+        if pieza.tipo is TipoPieza.PEON:
+            return self._destinos_de_peon(pieza)
+        if pieza.tipo is TipoPieza.CABALLO:
+            return self._destinos_de_saltador(pieza, DESPLAZAMIENTOS_CABALLO)
+        if pieza.tipo is TipoPieza.ALFIL:
+            return self._destinos_de_deslizador(pieza, DIAGONALES)
+        if pieza.tipo is TipoPieza.TORRE:
+            return self._destinos_de_deslizador(pieza, ORTOGONALES)
+        if pieza.tipo is TipoPieza.DAMA:
+            return self._destinos_de_deslizador(pieza, DIAGONALES + ORTOGONALES)
+        # El rey se mueve como un saltador y, si se pide, puede enrocar.
+        destinos = self._destinos_de_saltador(pieza, DESPLAZAMIENTOS_REY)
+        if incluir_enroque:
+            destinos += self._destinos_de_enroque(pieza)
+        return destinos
+
+    def _destinos_de_peon(self, pieza: Pieza) -> list[Posicion]:
+        """Destinos de un peón: avance recto y capturas diagonales.
+
+        El peón es la única pieza que no se mueve como "saltador" ni como
+        "deslizador": avanza recto, captura en diagonal y solo puede avanzar dos
+        casillas desde su fila inicial.
+        """
+        direccion = 1 if pieza.color is Color.BLANCO else -1
+        fila_inicial = FILA_INICIAL_PEONES[pieza.color]
+        destinos = []
+        # Avance de una casilla, solo si está vacía.
+        avance = pieza.posicion.desplazar(0, direccion)
+        if avance is not None and not self.en_juego(avance):
+            destinos.append(avance)
+            # Avance de dos casillas desde la fila inicial, si el camino está libre.
+            if pieza.posicion.fila == fila_inicial:
+                doble = pieza.posicion.desplazar(0, 2 * direccion)
+                if doble is not None and not self.en_juego(doble):
+                    destinos.append(doble)
+        # Capturas diagonales: solo si hay enemigo, o si es captura al paso.
+        for columnas in (-1, 1):
+            diagonal = pieza.posicion.desplazar(columnas, direccion)
+            if diagonal is None:
+                continue
+            objetivo = self.obtener(diagonal)
+            if objetivo is None:
+                if self._es_captura_al_paso(pieza, diagonal):
+                    destinos.append(diagonal)
+            elif objetivo.color is not pieza.color:
+                destinos.append(diagonal)
+        return destinos
+
+    def _destinos_de_saltador(self, pieza: Pieza, desplazamientos) -> list[Posicion]:
+        """Destinos de una pieza que "salta" a casillas concretas (rey y caballo)."""
+        destinos = []
+        for columnas, filas in desplazamientos:
+            destino = pieza.posicion.desplazar(columnas, filas)
+            if destino is None:
+                continue
+            objetivo = self.obtener(destino)
+            # Se puede saltar a una casilla vacía o a una con pieza enemiga.
+            if objetivo is None or objetivo.color is not pieza.color:
+                destinos.append(destino)
+        return destinos
+
+    def _destinos_de_deslizador(self, pieza: Pieza, direcciones) -> list[Posicion]:
+        """Destinos de una pieza que se desliza (torre, alfil, dama).
+
+        Se avanza casilla a casilla en cada dirección y se para en el primer
+        obstáculo: si hay pieza enemiga se puede capturar y ahí termina; si es
+        propia, no se puede seguir.
+        """
+        destinos = []
+        for columnas, filas in direcciones:
+            destino = pieza.posicion.desplazar(columnas, filas)
+            while destino is not None:
+                objetivo = self.obtener(destino)
+                if objetivo is None:
+                    destinos.append(destino)
+                else:
+                    if objetivo.color is not pieza.color:
+                        destinos.append(destino)
+                    break
+                destino = destino.desplazar(columnas, filas)
+        return destinos
+
+    def _destinos_de_enroque(self, rey: Pieza) -> list[Posicion]:
+        """Destinos de enroque del rey, si cumple todas las condiciones."""
+        # No se puede enrocar estando en jaque.
+        if self.esta_en_jaque(rey.color):
+            return []
+        fila = 0 if rey.color is Color.BLANCO else 7
+        # Solo desde la casilla inicial del rey.
+        if rey.posicion != Posicion(4, fila):
+            return []
+        destinos = []
+        for columna_destino, columna_torre, casillas_vacias, camino_rey in OPCIONES_ENROQUE:
+            if not self._tiene_derecho_enroque(rey.color, columna_destino):
+                continue
+            if not self._tiene_pieza(Posicion(columna_torre, fila), TipoPieza.TORRE, rey.color):
+                continue
+            # Las casillas entre el rey y su destino deben estar vacías
+            # (la casilla del rey se excluye: ya está ocupada por el rey).
+            if any(self.en_juego(Posicion(columna, fila)) for columna in casillas_vacias):
+                continue
+            # El rey no puede pasar por una casilla amenazada.
+            if any(self.es_ataqueada(Posicion(columna, fila), rey.color.contrario) for columna in camino_rey):
+                continue
+            destinos.append(Posicion(columna_destino, fila))
+        return destinos
+
+    def _tiene_derecho_enroque(self, color: Color, columna_destino: int) -> bool:
+        """Comprueba si el color conserva el derecho de ese enroque."""
+        base = "K" if columna_destino == 6 else "Q"
+        derecho = base if color is Color.BLANCO else base.lower()
+        return derecho in self.derechos_enroque
+
+    def _tiene_pieza(self, posicion: Posicion, tipo: TipoPieza, color: Color) -> bool:
+        """True si en esa casilla hay exactamente esa pieza de ese color."""
+        pieza = self.obtener(posicion)
+        return pieza is not None and pieza.tipo is tipo and pieza.color is color
+
+    # ------------------------------------------------------------------
+    # Utilidades y presentación
+    # ------------------------------------------------------------------
+
+    def clave(self) -> str:
+        """Cadena que identifica la posición, para detectar repeticiones.
+
+        Dos posiciones con la misma clave tienen exactamente las mismas
+        piezas en las mismas casillas, así que la clave sirve tanto para
+        detectar la repetición triple (tablas) como para guardar una posición
+        en caché sin necesidad de objetos.
+        """
+        casillas = []
+        for fila in range(7, -1, -1):
+            for columna in range(8):
+                pieza = self.obtener(Posicion(columna, fila))
+                casillas.append(pieza.simbolo if pieza is not None else ".")
+        return "".join(casillas)
+
+    def to_dict(self) -> dict:
+        """Serializa el tablero (usada por la persistencia).
+
+        Las piezas se guardan como lista, no como diccionario, porque las
+        claves (``Posicion``) no son serializables a JSON y la lista es más
+        legible para quien abra el archivo a mano.
+        """
+        return {
+            "piezas": [pieza.to_dict() for pieza in self.piezas()],
+            "derechos_enroque": sorted(self.derechos_enroque),
+            "ultima_jugada": self.ultima_jugada.to_dict() if self.ultima_jugada else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Tablero:
+        """Reconstruye el tablero desde su forma serializada."""
+        piezas = [Pieza.from_dict(datos) for datos in data.get("piezas", [])]
+        return cls(
+            {pieza.posicion: pieza for pieza in piezas},
+            set(data.get("derechos_enroque", [])),
+            Movimiento.from_dict(data["ultima_jugada"]) if data.get("ultima_jugada") else None,
+        )
+
+    def __str__(self) -> str:
+        """Dibuja el tablero en texto; lo usa la vista y los tests."""
+        filas = []
+        for fila in range(7, -1, -1):
+            casillas = [
+                self.obtener(Posicion(columna, fila)).simbolo
+                if self.en_juego(Posicion(columna, fila))
+                else "·"
+                for columna in range(8)
+            ]
+            filas.append(f"{fila + 1} {' '.join(casillas)}")
+        # Última línea: las letras de las columnas, para poder leer coordenadas.
+        filas.append(f"  {' '.join('abcdefgh')}")
+        return "\n".join(filas)
