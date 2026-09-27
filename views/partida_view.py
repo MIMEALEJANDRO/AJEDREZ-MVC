@@ -14,6 +14,12 @@ responde.
 La vista no contiene ninguna regla de ajedrez ni ningún detalle del formato
 en que se guardan las partidas: solo traduce entre lo que la persona ve y
 escribe, y los objetos del modelo.
+
+La clase implementa ``views.interfaz.InterfazVista``, que es el contrato que
+exige el controlador. Ese contrato vive en su propio archivo para que el
+controlador no dependa de la consola: si mañana esta clase se sustituye por una
+ventana, el controlador no se toca (mientras abide del contrato, que es
+justamente lo que el Protocol comprueba).
 """
 
 from __future__ import annotations
@@ -22,26 +28,32 @@ import sys
 from typing import TextIO
 
 from models.enums import Color, EstadoPartida
-from models.errores import ErrorAjedrez
 from models.partida import Partida
+from views.interfaz import (
+    OPCIONES_ARCHIVO,
+    OPCIONES_INICIO,
+    OPCIONES_PARTIDA,
+    InterfazVista,
+    texto_del_error,
+)
 
 # Ancho de las cabeceras de menú, para que el texto quede alineado.
 ANCHO = 46
 
-# Etiquetas legibles de cada estado de partida. Vive en la vista y no en el
-# modelo porque es una decisión de presentación: el modelo solo necesita el
-# valor del enum, y el texto exacto de la pantalla no es un dato del juego.
-ETIQUETAS_ESTADO = {
-    EstadoPartida.EN_CURSO: "En curso",
-    EstadoPartida.JQUE_MATE: "Jaque mate",
-    EstadoPartida.AHOGADO: "Ahogado (tablas)",
-    EstadoPartida.TABLAS: "Tablas",
-    EstadoPartida.ABANDONO: "Abandono",
-}
 
+class PartidaView(InterfazVista):
+    """Pinta el tablero y los menús, y recoge lo que la persona escribe.
 
-class PartidaView:
-    """Pinta el tablero y los menús, y recoge lo que la persona escribe."""
+    Las tres tablas de opciones se importan de ``views.interfaz`` y además se
+    dejan accesibles como atributos de clase (``PartidaView.OPCIONES_INICIO``).
+    Duplicarlas no aporta nada y convertirlas en atributos sí: es la forma
+    barata de tener "las opciones de esta pantalla" a mano sin buscarlas en otro
+    módulo.
+    """
+
+    OPCIONES_INICIO = OPCIONES_INICIO
+    OPCIONES_PARTIDA = OPCIONES_PARTIDA
+    OPCIONES_ARCHIVO = OPCIONES_ARCHIVO
 
     def __init__(self, entrada: TextIO | None = None, salida: TextIO | None = None) -> None:
         # ``None`` significa "la consola de verdad". Se resuelve una sola vez
@@ -89,13 +101,11 @@ class PartidaView:
           la información útil para saber qué está fallando. Esta vista no lanza
           nada: mostrar un error es justo lo que hace, y propagar la excepción
           es cosa del controlador, que es quien decide si se puede seguir.
+
+        El texto en sí lo decide ``views.interfaz.texto_del_error`` y no esta
+        vista, para que una ventana no tenga que decidirlo por su cuenta.
         """
-        if isinstance(error, ErrorAjedrez):
-            self.escribir(f"  No se pudo completar la acción: {error}")
-        elif isinstance(error, str):
-            self.escribir(f"  {error}")
-        else:
-            self.escribir(f"  Error inesperado ({type(error).__name__}): {error}")
+        self.escribir(f"  {texto_del_error(error)}")
 
     # ------------------------------------------------------------------
     # Entrada: cómo se pregunta
@@ -189,6 +199,9 @@ class PartidaView:
                 return respuesta
             if not hubo_entrada:
                 return al_agotar
+            # Solo se avisa si hubo una entrada que no era válida. Si no la
+            # hubo (final del archivo, Ctrl+D) ya se ha terminado arriba, y
+            # avisar de una opción vacía sería confuso.
             self.escribir(f"  Opción no válida: {respuesta!r}. Las válidas son: "
                           f"{', '.join(opciones)}.")
 
@@ -233,7 +246,7 @@ class PartidaView:
         self.escribir(str(partida.tablero))
         self.escribir()
         self.escribir(f"  {partida.resumen()}")
-        etiqueta = ETIQUETAS_ESTADO.get(partida.estado, partida.estado.value)
+        etiqueta = partida.estado.nombre_legible
         # El número de jugadas completas es la mitad del historial, redondeada
         # hacia arriba: tras 1 jugada hay medio juego, tras 2 hay 1 juego.
         jugadas = -(-len(partida.historial) // 2)
@@ -294,34 +307,9 @@ class PartidaView:
     # ------------------------------------------------------------------
     # Menús
     # ------------------------------------------------------------------
-
-    OPCIONES_PARTIDA = {
-        "1": "Introducir una jugada",
-        "2": "Ver el historial",
-        "3": "Ver el FEN (para copiarlo a otro programa)",
-        "4": "Deshacer la última jugada",
-        "5": "Guardar la partida",
-        "6": "Guardar y empezar otra",
-        "7": "Abandonar la partida",
-        "8": "Ayuda",
-        "0": "Volver al menú principal (la partida se queda como estaba)",
-    }
-
-    OPCIONES_ARCHIVO = {
-        "1": "Guardar la partida actual",
-        "2": "Cargar una partida guardada",
-        "3": "Ver las partidas guardadas",
-        "4": "Borrar una partida guardada",
-        "0": "Volver al juego",
-    }
-
-    OPCIONES_INICIO = {
-        "1": "Partida nueva",
-        "2": "Continuar una partida guardada",
-        "3": "Gestionar las partidas guardadas",
-        "4": "Ayuda",
-        "0": "Salir del programa",
-    }
+    # Las tablas de opciones están en ``views.interfaz`` y se han expuesto como
+    # atributos de clase al principio del archivo. Aquí solo queda el trabajo de
+    # pintarlas: un título y la pregunta.
 
     def menu_inicio(self) -> str:
         """Menú principal, antes de empezar a jugar."""

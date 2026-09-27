@@ -96,6 +96,19 @@ class EstadoPartida(Enum):
         """True si la partida ya no admite más jugadas."""
         return self is not EstadoPartida.EN_CURSO
 
+    @property
+    def nombre_legible(self) -> str:
+        """Cómo se escribe el estado para quien lo lee: "Jaque mate", "Tablas"...
+
+        Vive en el enum y no en la vista a propósito. Que un estado sea "jaque
+        mate" y no "Jaque mate" es información del dominio (el valor es lo que
+        se serializa y lo que comparan las pruebas), pero *cómo se escribe*
+        cuando se lo enseñas a alguien no es de la consola: lo necesita igual
+        una ventana, un PDF o un botón. Si la tabla viviera en la vista,
+        cualquier otra pantalla tendría que reinventarla.
+        """
+        return ETIQUETAS_ESTADO[self]
+
 
 # --------------------------------------------------------------------------
 # Tablas de traducción (letra FEN y nombre legible) de cada tipo de pieza.
@@ -130,3 +143,14 @@ LETRAS_FEN = {
 
 # Inversa para poder *parsear* un FEN: letra en minúscula -> tipo de pieza.
 LETRAS_FEN_INVERSAS = {letra.lower(): tipo for (tipo, _), letra in LETRAS_FEN.items()}
+
+# Cómo se escribe cada estado de partida. Se declara aquí (y no en la vista)
+# porque es el mismo dato para cualquier forma de mostrarlo, y porque
+# ``EstadoPartida.nombre_legible`` la consulta.
+ETIQUETAS_ESTADO = {
+    EstadoPartida.EN_CURSO: "En curso",
+    EstadoPartida.JQUE_MATE: "Jaque mate",
+    EstadoPartida.AHOGADO: "Ahogado (tablas por rey sin salida)",
+    EstadoPartida.TABLAS: "Tablas",
+    EstadoPartida.ABANDONO: "Abandono",
+}

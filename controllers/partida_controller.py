@@ -12,10 +12,12 @@ El controlador no decide *qué jugada es legal*: eso es del modelo. Y no
 escribe en pantalla: eso es de la vista. Su valor está en que conoce a las
 tres capas y no depende de ninguna en concreto:
 
-* recibe la ``Partida``, la ``PartidaView`` y el ``BaseStorage`` en el
+* recibe la ``Partida``, una ``InterfazVista`` y el ``BaseStorage`` en el
   constructor, así que se puede probar con dobles sin tocar el disco ni la
-  consola;
-* cambiar de JSON a FEN es cambiar un argumento, no reescribir el controlador.
+  pantalla;
+* cambiar de JSON a FEN es cambiar un argumento, no reescribir el controlador;
+* cambiar de consola a ventana es cambiar un argumento, porque solo conoce el
+  contrato de la vista y no ninguna vista en concreto.
 
 Los errores del dominio no se capturan aquí para silenciarlos: se capturan
 para *traducirlos*. ``MovimientoIlegal`` se convierte en un mensaje que
@@ -36,7 +38,7 @@ from models.partida import Partida
 from models.pieza import LETRAS_PROMOCION
 from models.posicion import Movimiento, Posicion
 from storage.base_storage import BaseStorage
-from views.partida_view import PartidaView
+from views.interfaz import InterfazVista
 
 # Caracteres que se quitan del texto de una jugada antes de interpretarlo.
 # Se admiten todos: "e2-e4", "e2e4", "e2 e4", "  e2e4  " y "e2:E4" son la
@@ -79,18 +81,23 @@ class PartidaController:
 
     def __init__(
         self,
+        vista: InterfazVista,
         partida: Partida | None = None,
-        vista: PartidaView | None = None,
         storage: BaseStorage | None = None,
         color_jugador: Color | None = None,
     ) -> None:
-        # Todos los colaboradores son opcionales y con valor por defecto para
-        # que se pueda construir un controlador en una sola línea tanto en el
-        # programa como en una prueba. La inyección por el constructor es lo
-        # que permite, por ejemplo, guardar en una carpeta temporal sin tocar
-        # el resto del código.
+        # ``vista`` va primero y es obligatorio. Antes era opcional con un
+        # ``PartidaView()`` por defecto, que tenía dos fallos: obligaba al
+        # controlador a importar la consola (y con ella a depender de ella), y
+        # escondía el error de "se me olvidó pasar la vista" hasta que el
+        # controlador intentaba hablar con un ``None``.
+        #
+        # Los otros colaboradores sí son opcionales, porque tenerlos por
+        # defecto es cómodo: la inyección por el constructor es lo que permite
+        # guardar en una carpeta temporal o usar un doble de vista en las
+        # pruebas sin tocar el resto del código.
+        self.vista = vista
         self.partida = partida if partida is not None else Partida()
-        self.vista = vista if vista is not None else PartidaView()
         self.storage = storage
         # Color con el que juega la persona. ``None`` significa "los dos
         # colores", que es lo que se usa en las pruebas y en el modo en que dos
