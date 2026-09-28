@@ -186,6 +186,27 @@ def notacion(movimiento: Movimiento, promocion: TipoPieza | None) -> str:
 LETRA_DE = {tipo: letra for letra, tipo in LETRAS_PROMOCION.items()}
 
 
+def promocion_de(movimiento: object) -> TipoPieza | None:
+    """La pieza con la que python-chess quiere coronar, o ``None``.
+
+    Ojo con el detalle, que es la razón de que esta función exista:
+    ``Move.promotion`` de python-chess **no** es la letra del FEN, es el tipo de
+    pieza como número (``chess.ROOK`` es el 4, ``chess.KNIGHT`` el 2...). Si se
+    busca directamente en un diccionario de letras, no se encuentra nada, se
+    devuelve ``None`` y el modelo corona a dama siempre. El síntoma era un
+    "fuzz" que reportaba diferencias en cualquier partida que llegara a una
+    coronación menor, cuando el motor las hace bien.
+
+    ``piece_symbol`` es la operación inversa: convierte ese número en la letra
+    ("r"), que es lo que sí entiende ``LETRAS_PROMOCION``.
+    """
+    import chess  # noqa: PLC0415
+
+    if movimiento.promotion is None:
+        return None
+    return LETRAS_PROMOCION.get(chess.piece_symbol(movimiento.promotion))
+
+
 # ---------------------------------------------------------------------------
 # python-chess, la referencia
 # ---------------------------------------------------------------------------
@@ -278,7 +299,6 @@ def fuzz(partidas: int, semilla: int) -> bool:
     en passant que resuelve un jaque, promociones encadenadas).
     """
     chess = requiere_chess()
-    letras = {letra: tipo for letra, tipo in LETRAS_PROMOCION.items()}
     generador = random.Random(semilla)
     diferencias: list[str] = []
 
@@ -304,7 +324,7 @@ def fuzz(partidas: int, semilla: int) -> bool:
         destino = Posicion(
             chess.square_file(movimiento.to_square), chess.square_rank(movimiento.to_square)
         )
-        modelo.mover(origen, destino, letras.get(movimiento.promotion))
+        modelo.mover(origen, destino, promocion_de(movimiento))
         tablero.push(movimiento)
         jugar(modelo, tablero, ply + 1)
 
