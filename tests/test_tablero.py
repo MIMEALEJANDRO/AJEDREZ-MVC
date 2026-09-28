@@ -443,6 +443,48 @@ class TestCapturaAlPaso:
         # Y el peón blanco que se capturó ya no está en e4.
         assert not tablero.en_juego(Posicion(4, 3))
 
+    def test_solo_un_peon_puede_capturar_al_paso(self):
+        # La captura al paso es una regla **de peones**: la casilla de la
+        # víctima se deduce de la última jugada, y como esa deducción es solo
+        # geométrica, cualquier otra pieza que se mueva a esa casilla puede
+        # "cumplirla" sin estar haciendo una captura al paso.
+        #
+        # Aquí el rey negro va de h4 a g3, en diagonal a la casilla de la
+        # posible captura al paso, que es la sexta fila para las negras. La
+        # casilla de la víctima se calcula como (columna del destino, fila del
+        # origen) = (6, 3) = g4, así que sin comprobar que la pieza que se
+        # mueve es un peón, el rey se llevaba por delante el peón blanco de g4
+        # sin haber pasado por él.
+        tablero = tablero_desde_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8")
+        # Se finge que la última jugada fue el avance doble de g2 a g4.
+        mover(tablero, "g2", "g4")
+        assert tablero.obtener(Posicion(6, 3)).tipo is TipoPieza.PEON
+        # El rey se mueve a g3 y no se lleva a nadie por el camino.
+        capturada = mover(tablero, "h4", "g3")
+        assert capturada is None
+        # El peón blanco sigue en g4: el rey no captura al paso.
+        assert tablero.obtener(Posicion(6, 3)).tipo is TipoPieza.PEON
+        # Y el rey está en g3.
+        assert tablero.obtener(Posicion(6, 2)).tipo is TipoPieza.REY
+
+    def test_ninguna_otra_pieza_genera_una_captura_al_paso(self):
+        # La misma comprobación con una pieza que no es el rey: un alfil negro
+        # en d4 que se mueve a e3.
+        #
+        # La casilla de la víctima se deduce de la última jugada, así que para
+        # que e3 "cuadre" tiene que cumplirse que la columna del destino sea la
+        # de la casilla del peón (e) y que la fila de la pieza que se mueve sea
+        # la del peón (4). Un alfil en d4 cumple las dos cosas.
+        tablero = tablero_desde_fen("4k3/8/8/8/3bP3/8/8/4K3")
+        # Se finge que la última jugada fue el avance doble del peón blanco.
+        tablero.ultima_jugada = Movimiento(Posicion(4, 1), Posicion(4, 3))  # e2-e4
+        capturada = mover(tablero, "d4", "e3")
+        # e3 estaba vacía: es un movimiento normal, no una captura.
+        assert capturada is None
+        # El peón blanco de e4 no se ha movido: el alfil no captura al paso.
+        assert tablero.obtener(Posicion(4, 3)).tipo is TipoPieza.PEON
+        assert tablero.obtener(Posicion(4, 2)).tipo is TipoPieza.ALFIL
+
     def test_no_hay_captura_al_paso_si_el_peon_no_avanza_dos_casillas(self):
         # 1. e4 d5 2. e5: el peón blanco avanza una sola casilla y el peón negro
         # se queda en d5, al lado pero no en diagonal. Con la casilla d6 vacía,

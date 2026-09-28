@@ -385,13 +385,25 @@ class Tablero:
         un peón dos casillas y dejó su peón justo al lado del nuestro. Todas
         esas condiciones se comprueban aquí:
 
+        0. **la pieza que se mueve es un peón** (y no cualquier otra pieza),
         1. la casilla destino es la sexta (para blancas) o la tercera (negras),
         2. el destino es diagonal a la casilla del peón que captura,
         3. el peón está en la fila inmediatamente anterior a la del destino,
         4. la última jugada fue un avance de peón de dos casillas,
         5. ese peón acabó en la casilla contigua a nuestro peón,
         6. en esa casilla hay efectivamente un peón enemigo.
+
+        La condición 0 parece redundante porque el método se llama desde
+        ``_destinos_de_peon``, pero ``_aplicar`` también lo llama y ahí la pieza
+        que se mueve es la que sea. Sin esa comprobación, cualquier pieza que
+        se moviese en diagonal a la casilla de la posible captura al paso se
+        llevaría por delante un peón que no está en su camino: la casilla de la
+        víctima se calcula como ``(columna del destino, fila del origen)``, y
+        para un rey o un alfil cualquiera esa cuenta da una casilla
+        perfectamente válida.
         """
+        if pawn.tipo is not TipoPieza.PEON:
+            return False
         if self.ultima_jugada is None:
             return False
         fila_destino = 5 if pawn.color is Color.BLANCO else 2
