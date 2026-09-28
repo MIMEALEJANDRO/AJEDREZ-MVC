@@ -1,19 +1,26 @@
-﻿# Ejecución automática: pruebas y perft en cada push.
+﻿# Ejecución automática: pruebas, ventana y perft en cada push.
 #
-# Son las dos comprobaciones que ya existen en el proyecto y que se ejecutan a
-# mano, pero que en la práctica no se ejecutaban a mano. Con esto, un error de
-# reglas o una regresión grande de rendimiento la ve el push, no la siguiente
-# persona que abra el proyecto.
+# Son las comprobaciones que ya existen en el proyecto y que se ejecutan a mano,
+# pero que en la práctica no se ejecutaban a mano. Con esto, un error de reglas,
+# un fallo de la ventana o una regresión grande de rendimiento la ve el push, no
+# la siguiente persona que abra el proyecto.
 #
-# Las dos líneas que importan:
+# Lo que se ejecuta:
 #
-#   python -m pytest
+#   xvfb-run -a python -m pytest
+#   xvfb-run -a python smoke_ventana.py
 #   python perft_ajedrez.py --profundidad 3
 #
-# La segunda es la que cuesta (unos 50 s aquí, el doble en un runner lento), por
-# eso no se repite en cada versión de Python: `pytest` ya incluye pruebas de
-# perft en `tests/test_perft.py` (perft(1) y perft(2) en las seis posiciones, y
-# perft(3) en las dos baratas), así que la matriz también vigila las reglas.
+# Lo del xvfb es por los tests de ventana: `tests/test_ventana.py` abre una `Tk()`
+# de verdad, y sin un servidor gráfico no hay ni pantalla ni eventos. En un
+# equipo con escritorio (Windows, macOS, Linux con sesión gráfica) `python -m
+# pytest` a secas ya funciona, y por eso las pruebas se saltan solas si no hay
+# pantalla, en vez de romper la batería entera.
+#
+# El perft es el que cuesta (unos 50 s aquí, el doble en un runner lento), por
+# eso no se repite en cada versión de Python: `pytest` ya incluye pruebas de perft
+# en `tests/test_perft.py` (perft(1) y perft(2) en las seis posiciones, y perft(3)
+# en las dos baratas), así que la matriz también vigila las reglas.
 
 name: Pruebas
 
@@ -53,8 +60,52 @@ jobs:
       - name: Comprobar la versión de Python
         run: python -VV
 
-      - name: Ejecutar las pruebas
-        run: python -m pytest
+      # `tkinter` no viene con CPython como módulo compilado: hace falta el
+      # paquete del sistema. En los runners de Ubuntu suele venir ya, pero no se
+      # da por hecho; y si tampoco está en el apt se avisa, porque las pruebas de
+      # ventana se saltan solas y el resto de la batería sigue valiendo.
+      - name: Tener tkinter
+        run: |
+          if python -c "import tkinter" 2>/dev/null; then
+            echo "tkinter disponible"
+          elif sudo apt-get update -qq && sudo apt-get install -y -qq python3-tk; then
+            echo "tkinter instalado"
+          else
+            echo "::warning::no hay tkinter; los tests de ventana se saltaran"
+          fi
+
+      - name: Ejecutar las pruebas (con pantalla virtual)
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" python -m pytest
+
+  ventana:
+    # La prueba de humo de la ventana: abre el tablero, pulsa casillas con el ratón
+    # simulado y comprueba que lo pintado es lo que dice el modelo. No está en la
+    # batería de pytest porque necesita la ventana mapeada de verdad.
+    name: humo de la ventana
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Instalar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Tener tkinter
+        run: |
+          if python -c "import tkinter" 2>/dev/null; then
+            echo "tkinter disponible"
+          elif sudo apt-get update -qq && sudo apt-get install -y -qq python3-tk; then
+            echo "tkinter instalado"
+          else
+            echo "::warning::no hay tkinter; el humo de la ventana se saltara"
+          fi
+
+      # El guion saca la ventana de la pantalla y la pone transparente, así que
+      # esto no molesta aunque el runner tenga sesión gráfica.
+      - name: Ejecutar el humo de la ventana
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" python smoke_ventana.py
 
   perft:
     # El generador de jugadas contra los valores de referencia de python-chess.
