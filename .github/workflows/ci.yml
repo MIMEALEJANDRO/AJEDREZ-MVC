@@ -1,4 +1,4 @@
-# Ejecución automática: pruebas y perft en cada push.
+﻿# Ejecución automática: pruebas y perft en cada push.
 #
 # Son las dos comprobaciones que ya existen en el proyecto y que se ejecutan a
 # mano, pero que en la práctica no se ejecutaban a mano. Con esto, un error de
@@ -37,10 +37,10 @@ jobs:
         python-version: ["3.10", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Instalar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -69,10 +69,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Instalar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
