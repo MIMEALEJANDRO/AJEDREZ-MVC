@@ -52,13 +52,45 @@ CONTRATO = {
 }
 
 
+def _atributos_del_protocolo(protocolo: type) -> set[str]:
+    """Los nombres que un ``Protocol`` declara, en cualquier versión de Python.
+
+    ``Protocol.__protocol_attrs__`` es la forma oficial, pero **solo existe desde
+    la 3.12**. En la 3.10 y la 3.11 no está, y el atributo se hadAccess da
+    ``AttributeError``, que es exactamente lo que pasó en la CI al probar la
+    3.10: el proyecto declara ``requires-python = ">=3.10"``, así que la prueba
+    tiene que funcionar también ahí.
+
+    El recurso es el atributo oficial cuando existe y, si no, la lista de
+    miembros del propio ``Protocol``. Sale lo mismo en los dos casos **para este
+    contrato**, porque aquí todos los miembros son métodos definidos con
+    ``def`` y no hay miembros de datos ni propiedades declaradas sin
+    implementar. Por eso el recurso está en la prueba y no en
+    ``views/interfaz.py``: es una compatibilidad de la comprobación, no una
+    diferencia en el contrato.
+
+    Si algún día el ``Protocol`` declarara algo que no sea un método (un
+    ``nombre: str`` sin valor, por ejemplo), este recurso dejaría de coincidir
+    con ``__protocol_attrs__`` en la 3.10 y la prueba lo diría en la 3.12, que es
+    justo cuando hay que darse cuenta.
+    """
+    declarados = getattr(protocolo, "__protocol_attrs__", None)
+    if declarados is not None:
+        return set(declarados)
+    return {
+        nombre
+        for nombre, valor in vars(protocolo).items()
+        if not nombre.startswith("_") and (callable(valor) or isinstance(valor, property))
+    }
+
+
 # ----------------------------------------------------------------------
 # El contrato
 # ----------------------------------------------------------------------
 
 class TestElContrato:
     def test_el_contracto_no_se_va_a_ampliar_solas(self) -> None:
-        declarados = set(InterfazVista.__protocol_attrs__)
+        declarados = _atributos_del_protocolo(InterfazVista)
         assert declarados == CONTRATO
 
     @pytest.mark.parametrize("vista", [PartidaView, VistaGUI])
