@@ -86,9 +86,9 @@ class PartidaController:
         storage: BaseStorage | None = None,
         color_jugador: Color | None = None,
     ) -> None:
-        # ``vista`` va primero y es obligatorio. Antes era opcional con un
-        # ``PartidaView()`` por defecto, que tenía dos fallos: obligaba al
-        # controlador a importar la consola (y con ella a depender de ella), y
+        # ``vista`` va primero y es obligatorio. Antes era opcional con una
+        # vista de consola por defecto, que tenía dos fallos: obligaba al
+        # controlador a importar esa pantalla (y con ella a depender de ella), y
         # escondía el error de "se me olvidó pasar la vista" hasta que el
         # controlador intentaba hablar con un ``None``.
         #
@@ -116,10 +116,16 @@ class PartidaController:
     def ejecutar(self) -> None:
         """Menú principal: nueva partida, gestionar archivos, ayuda o salir.
 
-        Se elige el bucle más externo aquí y no en ``main.py`` a propósito:
-        ``main.py`` solo configura (dónde se guarda, qué vista se usa) y
+        Se elige el bucle más externo aquí y no en el arranque a propósito: el
+        arranque solo configura (dónde se guarda, qué vista se usa) y
         ``controlador.ejecutar()`` es quien decide la forma de la conversación.
         Así la aplicación se puede probar entera desde aquí.
+
+        **Aviso**: desde que se borraron la consola y la ventana de menús, ninguna
+        pantalla llama a este método. Se conserva porque sus pruebas siguen en pie
+        y porque el bucle documenta la forma de conversar con una persona; la
+        ventana jugable llama directamente a ``aplicar_jugada``, ``guardar``,
+        ``cargar`` y ``deshacer``. Ver la nota del README sobre qué queda sin uso.
         """
         while True:
             opcion = self.vista.menu_inicio()
@@ -244,8 +250,9 @@ class PartidaController:
         """Pide una jugada y la intenta aplicar.
 
         Es un atajo de ``aplicar_jugada``: pregunta con ``pedir_jugada`` y le
-        pasa el texto. Existe aparte porque es lo que usan la consola y
-        ``VistaGUI``, las dos vistas que leen de la persona.
+        pasa el texto. Existe aparte para el bucle de menús, que es el que
+        pregunta y espera. La ventana jugable no lo usa: llama a
+        ``aplicar_jugada`` directamente, porque no tiene menús.
 
         Devuelve ``True`` si la jugada se aceptó. Ese valor lo usan las pruebas
         para comprobar el resultado sin mirar lo impreso, y no tiene otro uso en

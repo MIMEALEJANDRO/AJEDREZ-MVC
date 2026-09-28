@@ -1,10 +1,10 @@
 """Pruebas del reparto de casillas entre el modelo y la pantalla.
 
-La ventana jugable (la de ``main_ventana.py``, no la de ``VistaGUI``) tiene que
-decidir en un único sitio dónde cae cada casilla: el dibujo, el clic y el ratón
-pasan por ``_a_pantalla`` / ``_de_pantalla``. Cuando el dibujo invertía una fila
-y el clic la otra, el tablero salía del revés y, al pulsar una pieza negra, se
-movía una blanca: nada en el modelo ni en el controlador estaba mal.
+La ventana jugable tiene que decidir en un único sitio dónde cae cada casilla: el
+dibujo, el clic y el ratón pasan por ``_a_pantalla`` / ``_de_pantalla``. Cuando el
+dibujo invertía una fila y el clic la otra, el tablero salía del revés y, al
+pulsar una pieza negra, se movía una blanca: nada en el modelo ni en el
+controlador estaba mal.
 
 Estas pruebas no necesitan pantalla. Los tres métodos no tocan el lienzo (son
 cálculo puro sobre la posición y el tamaño de la casilla), así que se pueden

@@ -14,8 +14,6 @@ que ya no existe. Como doble independiente, cualquier cambio en la interfaz se
 muestra aquí como un error claro.
 """
 
-import io
-
 import pytest
 
 from controllers.partida_controller import PartidaController
@@ -23,7 +21,7 @@ from models.enums import Color, EstadoPartida, TipoPieza
 from models.errores import MovimientoIlegal
 from models.partida import Partida
 from storage.base_storage import BaseStorage
-from views.partida_view import PartidaView
+from views.interfaz import OPCIONES_ARCHIVO, OPCIONES_INICIO, OPCIONES_PARTIDA
 
 
 # ----------------------------------------------------------------------
@@ -33,7 +31,7 @@ from views.partida_view import PartidaView
 class VistaFalsa:
     """Vista que registra lo escrito y responde con lo que se le prepare.
 
-    Implementa los métodos que el controlador usa de ``PartidaView``. Cuando
+    Implementa los métodos que el controlador usa de ``InterfazVista``. Cuando
     se acabaron las respuestas preparadas se repite la última, para que una
     prueba no tenga que adivinar cuántas veces se va a preguntar.
     """
@@ -114,13 +112,13 @@ class VistaFalsa:
             self.escribir(f"  {informe['id']}")
 
     def menu_inicio(self) -> str:
-        return self.pedir_opcion(PartidaView.OPCIONES_INICIO, "Opción")
+        return self.pedir_opcion(OPCIONES_INICIO, "Opción")
 
     def menu_partida(self) -> str:
-        return self.pedir_opcion(PartidaView.OPCIONES_PARTIDA, "Opción")
+        return self.pedir_opcion(OPCIONES_PARTIDA, "Opción")
 
     def menu_archivo(self) -> str:
-        return self.pedir_opcion(PartidaView.OPCIONES_ARCHIVO, "Opción")
+        return self.pedir_opcion(OPCIONES_ARCHIVO, "Opción")
 
     # -- ayuda para las comprobaciones ----------------------------------
     def texto(self) -> str:
@@ -577,156 +575,6 @@ class TestPersistencia:
 # La vista real
 # ----------------------------------------------------------------------
 
-class TestPartidaView:
-    """La vista con flujos inyectados, para comprobar entrada y salida.
-
-    Se prueban con ``StringIO`` en vez de con la consola: es la razón de
-    inyectar los flujos. Así se comprueba qué se pide y qué se imprime, sin
-    depender de una terminal.
-    """
-
-    def vista(self, entrada: str = "") -> tuple[PartidaView, io.StringIO]:
-        salida = io.StringIO()
-        return PartidaView(entrada=io.StringIO(entrada), salida=salida), salida
-
-    def test_pide_un_texto(self):
-        vista, salida = self.vista("e2e4\n")
-        assert vista.pedir_texto("Jugada") == "e2e4"
-        assert "Jugada" in salida.getvalue()
-
-    def test_devuelve_el_valor_por_defecto_si_no_se_escribe_nada(self):
-        # Quien pulsa Enter sin querer elige la opción marcada, que en un
-        # menú es lo razonable.
-        vista, _ = self.vista("\n")
-        assert vista.pedir_texto("Color", "1") == "1"
-
-    def test_sin_entrada_devuelve_el_valor_por_defecto(self):
-        # Entrada agotada: en vez de reventar con una traza de error, se
-        # devuelve el valor por defecto para que el programa pueda terminar.
-        vista, _ = self.vista("")
-        assert vista.pedir_texto("Color", "2") == "2"
-
-    def test_pedir_opcion_rechaza_una_opcion_invalida(self):
-        vista, salida = self.vista("9\n1\n")
-        assert vista.pedir_opcion({"1": "Nueva", "0": "Salir"}) == "1"
-        assert "no válida" in salida.getvalue()
-
-    def test_pedir_confirmacion(self):
-        assert self.vista("s\n")[0].pedir_confirmacion("¿Seguro?") is True
-        assert self.vista("n\n")[0].pedir_confirmacion("¿Seguro?") is False
-        assert self.vista("\n")[0].pedir_confirmacion("¿Seguro?") is False
-
-    def test_pedir_texto_opcional_cancela_con_guion(self):
-        vista, _ = self.vista("-\n")
-        assert vista.pedir_texto_opcional("Nombre") is None
-
-    def test_pedir_texto_opcional_devuelve_el_texto(self):
-        vista, _ = self.vista("mi partida\n")
-        assert vista.pedir_texto_opcional("Nombre") == "mi partida"
-
-    def test_muestra_el_tablero(self):
-        vista, salida = self.vista()
-        vista.mostrar_tablero(Partida())
-        texto = salida.getvalue()
-        assert "Tablero" in texto
-        assert "♔" in texto
-        assert "Turno de las blancas" in texto
-
-    def test_muestra_el_historial_vacio(self):
-        vista, salida = self.vista()
-        vista.mostrar_historial(Partida())
-        assert "todavía no hay jugadas" in salida.getvalue()
-
-    def test_muestra_que_no_hay_partidas_guardadas(self):
-        vista, salida = self.vista()
-        vista.mostrar_partidas([])
-        assert "no hay ninguna" in salida.getvalue()
-
-    def test_los_errores_del_dominio_se_muestran_sin_tipo(self):
-        # Un error del dominio es un problema de lo que escribió la persona:
-        # se muestra su mensaje, que ya está redactado para eso.
-        vista, salida = self.vista()
-        vista.mostrar_error(MovimientoIlegal("Movimiento no permitido: e2-e5."))
-        texto = salida.getvalue()
-        assert "Movimiento no permitido" in texto
-        assert "Error inesperado" not in texto
-
-    def test_los_errores_inesperados_muestran_su_tipo(self):
-        # Un error que no es del dominio no tiene un mensaje útil: se muestra
-        # su clase para saber qué está pasando.
-        vista, salida = self.vista()
-        vista.mostrar_error(ZeroDivisionError("división por cero"))
-        assert "ZeroDivisionError" in salida.getvalue()
-
-    def test_el_tablero_se_dibuja_una_fila_por_rango(self):
-        # Se comprueba el dibujo porque es lo primero que ve quien juega.
-        vista, salida = self.vista()
-        partida = Partida()
-        partida.mover("e2", "e4")
-        vista.mostrar_tablero(partida)
-        lineas = salida.getvalue().splitlines()
-        # El tablero ocupa 8 líneas numeradas (más la de las letras).
-        # Se usa ``isdigit()`` y no ``linea[:1] in "12345678"`` porque en Python
-        # ``"" in "12345678"`` es ``True``: la línea vacía que ``mostrar_tablero``
-        # escribe antes y después del tablero también contaría como rango.
-        assert sum(1 for linea in lineas if linea[:1].isdigit()) == 8
-
-    def test_sin_entrada_devuelve_la_opcion_de_salir(self):
-        # El bucle de repregunta de "opción no válida" tiene un caso terminal:
-        # que se acabe la entrada (Ctrl+D, o una entrada canalizada). Antes de
-        # que este método devoliera "", que no era ninguna clave, el ``while
-        # True`` repreguntaba para siempre y el programa se colgaba. Ahora
-        # devuelve la opción de salir, que es lo único sensato cuando ya no
-        # hay nadie a quien preguntar.
-        vista, salida = self.vista(entrada="")
-        assert vista.pedir_opcion({"1": "Nueva", "0": "Salir"}) == "0"
-
-    def test_sin_entrada_devuelve_el_valor_por_defecto(self):
-        # Para un texto suelto el comportamiento es el de siempre: el valor por
-        # defecto. La diferencia con un menú es que un texto vacío puede
-        # significar algo ("no" en la confirmación de abandonar) mientras que
-        # una clave de menú vacía no significa nada.
-        vista, _ = self.vista(entrada="")
-        assert vista.pedir_texto("Nombre", "por_defecto") == "por_defecto"
-
-    def test_una_opcion_no_valida_repregunta(self):
-        # Una clave que no está en el menú sí es un error de quien escribe, y
-        # se repregunta: es más amable que terminar. Se comprueba que la
-        # repregunta ocurre, no que devuelva la opción equivocada.
-        vista, salida = self.vista(entrada="99\n1\n")
-        assert vista.pedir_opcion({"1": "Nueva", "0": "Salir"}) == "1"
-        assert "Opción no válida" in salida.getvalue()
-
-    def test_el_texto_se_normaliza_a_mayusculas_en_las_opciones(self):
-        # Escribir "1" con mayúscula no es lo mismo que escribir una letra: el
-        # menú compara claves exactas, así que "1" es la única que vale. Esta
-        # prueba fija esa decisión, porque es la que hace el bucle de repregunta
-        # necesario en lugar de opcional.
-        vista, _ = self.vista(entrada="X\n0\n")
-        assert vista.pedir_opcion({"1": "Nueva", "0": "Salir"}) == "0"
-
-    def test_los_menus_no_dejan_huecos_en_la_numeracion(self):
-        # Un menú que salta del 7 al 9 (que fue lo que pasaba) parece que le
-        # falta una opción, y hace dudar de si hay un error. Se comprueba que
-        # las claves son 1..n seguidas del 0, que es el orden en el que se leen.
-        for nombre, opciones in (
-            ("OPCIONES_INICIO", PartidaView.OPCIONES_INICIO),
-            ("OPCIONES_PARTIDA", PartidaView.OPCIONES_PARTIDA),
-            ("OPCIONES_ARCHIVO", PartidaView.OPCIONES_ARCHIVO),
-        ):
-            numericas = sorted(int(c) for c in opciones if c != "0")
-            expected = list(range(1, len(numericas) + 1))
-            assert numericas == expected, f"{nombre} tiene un hueco: {numericas}"
-
-    def test_la_ayuda_del_juego_es_la_opcion_8(self):
-        # El número concreto no debería ser una decisión arbitraria de cada
-        # archivo: la ayuda se numera la última antes del 0 para que quede claro
-        # que no es una jugada.
-        assert "8" in PartidaView.OPCIONES_PARTIDA
-        assert PartidaView.OPCIONES_PARTIDA["8"] == "Ayuda"
-        assert "9" not in PartidaView.OPCIONES_PARTIDA
-
-
 class TestGestionarArchivos:
     """El menú de gestión de archivos, que antes no tenía ninguna prueba.
 
@@ -737,7 +585,7 @@ class TestGestionarArchivos:
 
     def test_el_menu_principal_ofrece_gestionar_los_archivos(self):
         vista = VistaFalsa()
-        assert "3" in PartidaView.OPCIONES_INICIO
+        assert "3" in OPCIONES_INICIO
         assert vista.menu_inicio() == "0"  # sin respuestas, se sale
 
     def test_gestionar_archivos_lista_las_partidas(self, controlador, vista):
@@ -798,3 +646,35 @@ class TestGestionarArchivos:
         vista.opciones = ["3", "0", "0"]
         controlador.ejecutar()
         assert vista.escrito[-1] == "Hasta la próxima."
+
+
+class TestTablasDeMenus:
+    """Los datos de los menús, que viven en ``views.interfaz``.
+
+    Estas pruebas estaban dentro de la clase de la vista de consola, y se han
+    quedao aquí (y no se han borrado con ella) porque lo que comprueban no es la
+    consola: son las tablas ``OPCIONES_*``, que viven en ``views/interfaz.py`` y
+    que el bucle de menús del controlador sigue usando. Borrarlas habría dejado
+    sin comprobar un fichero que se queda.
+    """
+
+    def test_los_menus_no_dejan_huecos_en_la_numeracion(self):
+        # Un menú que salta del 7 al 9 (que fue lo que pasaba) parece que le
+        # falta una opción, y hace dudar de si hay un error. Se comprueba que
+        # las claves son 1..n seguidas del 0, que es el orden en el que se leen.
+        for nombre, opciones in (
+            ("OPCIONES_INICIO", OPCIONES_INICIO),
+            ("OPCIONES_PARTIDA", OPCIONES_PARTIDA),
+            ("OPCIONES_ARCHIVO", OPCIONES_ARCHIVO),
+        ):
+            numericas = sorted(int(c) for c in opciones if c != "0")
+            expected = list(range(1, len(numericas) + 1))
+            assert numericas == expected, f"{nombre} tiene un hueco: {numericas}"
+
+    def test_la_ayuda_del_juego_es_la_opcion_8(self):
+        # El número concreto no debería ser una decisión arbitraria de cada
+        # archivo: la ayuda se numera la última antes del 0 para que quede claro
+        # que no es una jugada.
+        assert "8" in OPCIONES_PARTIDA
+        assert OPCIONES_PARTIDA["8"] == "Ayuda"
+        assert "9" not in OPCIONES_PARTIDA

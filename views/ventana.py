@@ -1,22 +1,23 @@
 """Ventana jugable: un tablero de verdad, con botones y sin diálogos de menú.
 
-Esta es la tercera pantalla del programa, y **no** es una implementación de
+Esta es **la única** pantalla del programa, y **no** es una implementación de
 ``views.interfaz.InterfazVista``. Es importante decir por qué, porque es la
 decisión de diseño que hace que esto funcione sin reescribir el controlador.
 
-Las dos vistas que había (``PartidaView`` y ``VistaGUI``) son *consumidoras* de
-un controlador que escribe en bloque: el controlador llama a ``menu_partida()`` y
-se queda parado hasta que alguien contesta. Para hablar con una de ellas, la
-ventana tiene que saber **preguntar**, y preguntar en ``tkinter`` significa abrir
-un diálogo modal y esperar con ``wait_window()``. Por eso las dos vistas tienen
-menús y no botones: no es que no se pudiera, es que un diálogo modal es
-justamente lo que hace posible reutilizar el controlador tal cual.
+Las dos vistas que hubo antes (la consola y la ventana de menús) eran
+*consumidoras* de un controlador que escribe en bloque: el controlador llamaba a
+``menu_partida()`` y se quedaba parado hasta que alguien contestaba. Para hablar
+con una de ellas, la ventana tenía que saber **preguntar**, y preguntar en
+``tkinter`` significa abrir un diálogo modal y esperar con ``wait_window()``. Por
+esos dos motivos tenían menús y no botones: no es que no se pudiera, es que un
+diálogo modal es justamente lo que hace posible reutilizar el controlador tal
+cual. Ambas se han borrado, y el esquema de "el controlador pregunta y espera" se
+queda sin uso junto con ellas.
 
 Una ventana de ajedrez de verdad no tiene menús: tiene un tablero, se hace clic
 en dos casillas y la jugada está hecha. No hay nada que preguntar. Y si no hay
-nada que preguntar, el modelo de "el controlador pregunta y espera" se queda sin
-usar, y con él se cae el ``PuenteHilos`` entero: nadie espera, así que no hay
-nada que repartir entre el hilo que dibuja y el que decide.
+nada que preguntar, no hace falta ni puente de hilos: nadie espera, así que no
+hay nada que repartir entre el hilo que dibuja y el que decide.
 
 Por eso aquí la relación es **invertida**. No es el controlador el que empuja
 menús hacia la pantalla, es la pantalla la que **tira** de las acciones del
@@ -28,26 +29,25 @@ controlador cuando alguien pulsa un botón o hace clic en una casilla:
     botón Cargar             ->  controlador.cargar(clave)
 
 Esos métodos ya existían y ya estaban probados, porque son las acciones que el
-menú de la consola llama por dentro. Lo único que faltaba era una puerta de
+menú de la consola llamaba por dentro. Lo único que faltaba era una puerta de
 entrada para las jugadas, y esa es ``PartidaController.aplicar_jugada``: la misma
 validación, la misma traducción de errores y la misma comprobación de turno que
-usa la consola, pero sin la pregunta previa. Por eso esta ventana puede
+usaba la consola, pero sin la pregunta previa. Por eso esta ventana puede
 aprovechar el controlador entero sin copiar ni una línea de su lógica.
 
-Y ``InterfazVista`` se queda como estaba, cumpliendo su promesa de siempre: la
-consola y la ventana de diálogos siguen siendo intercambiables porque las dos
-cumplen el contrato. Esta ventana no lo cumple **a propósito**, porque no es
-intercambiable con ellas: no se le puede poner un ``PartidaView`` debajo, ni
-viceversa. Decir que cumple el contrato sería mentir, y un ``Protocol`` que
-miente es peor que no tener contrato.
+Y ``InterfazVista`` se conserva, aunque ya no lo implemente ninguna pantalla,
+porque el bucle de menús del controlador sigue escrito y probado contra él (ver
+``views/__init__.py`` y la nota del README sobre qué queda sin uso). Esta
+ventana no lo cumple **a propósito**: no es intercambiable con una vista de
+menús, porque no tiene menús. Decir que cumple el contrato sería mentir, y un
+``Protocol`` que miente es peor que no tener contrato.
 
-Lo que sí comparte con el resto del programa, y es lo que importa: ``models/`` no
-sabe que esto existe, ``storage/`` tampoco, y el controlador no ha tenido que
-cambiar de forma para acomodar a una tercera pantalla. La diferencia entre una
-ventana con menús y una con botones está entera en la vista, que es donde
-debería estar.
+Lo que sí comparte con el resto del programa, y es lo que importa: ``models/``
+no sabe que esto existe, ``storage/`` tampoco, y el controlador no ha tenido que
+cambiar de forma para acomodar la pantalla. La diferencia entre una ventana con
+menús y una con botones está entera en la vista, que es donde debería estar.
 
-Para arrancarla, ``main_ventana.py`` en la raíz del proyecto.
+Para arrancarla, ``python main_ventana.py`` en la raíz del proyecto.
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ from models.posicion import Movimiento, Posicion
 from storage.base_storage import BaseStorage
 from views.interfaz import texto_del_error
 
-# Lado de cada casilla, en píxeles. Algo mayor que en ``VistaGUI`` porque aquí las
-# casillas tienen que ser cómodas de pulsar con el ratón.
+# Lado de cada casilla, en píxeles. Son deliberadamente grandes porque aquí las
+# casillas se pulsan con el ratón y tienen que ser cómodas de acertar.
 LADO_CASILLA = 56
 MARGEN = 24
 

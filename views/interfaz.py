@@ -17,12 +17,17 @@ la vista **ofrece**, no lo que el controlador **quiere**. Que lo declare la capa
 que lo implementa deja la dependencia en un solo sentido (el controlador conoce
 la interfaz; la vista no conoce al controlador).
 
-Y por qué existe, en concreto: hasta ahora el controlador importaba
-``PartidaView`` solo para poder escribir el tipo de ``vista`` en el constructor.
-Eso obligaba a que la consola estuviera instalada para poder probar el
-controlador, y convertía "cambiar la vista" en un cambio que tocaba el
-controlador. Con este archivo, el controlador depende de la interfaz y ya no de
-la consola.
+Y por qué existe, en concreto: el controlador importaba la vista de consola solo
+para poder escribir el tipo de ``vista`` en el constructor. Eso obligaba a que la
+consola estuviera instalada para poder probar el controlador, y convertía
+"cambiar de vista" en un cambio que tocaba el controlador. Con este archivo, el
+controlador depende de la interfaz y ya no de ninguna pantalla concreta.
+
+Estado actual: desde que se borraron la consola y la ventana de menús, ninguna
+pantalla implementa este ``Protocol`` (la ventana jugable no usa menús, y está
+explicado en su módulo). Se conserva porque el bucle de menús del controlador
+sigue escrito y probado contra él, y porque las tablas ``OPCIONES_*`` de abajo
+son los datos de esos menús. Es una poda pendiente, anotada en el README.
 
 Uso::
 
@@ -48,9 +53,9 @@ from models.partida import Partida
 # se quede con la mitad y la otra con la otra mitad.
 #
 # La clave es lo que la persona escribe y el valor es lo que se lee. El "0" de
-# "volver" no es un accidents: es la convención de que la última opción de
-# cualquier menú es siempre salir, y `PartidaView.pedir_opcion` la usa como
-# salida por defecto cuando se acaba la entrada.
+# "volver" no es un accidente: es la convención de que la última opción de
+# cualquier menú es siempre salir, y el bucle de menús del controlador la usa
+# como salida por defecto cuando se acaba la entrada.
 
 OPCIONES_INICIO = {
     "1": "Partida nueva",

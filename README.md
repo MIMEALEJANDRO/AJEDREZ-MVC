@@ -6,49 +6,43 @@ separa las reglas, los archivos y la pantalla en capas que se pueden probar por
 separado, y que además permite cambiar de pantalla sin tocar las reglas.
 
 ```
-main.py  /  main_gui.py  /  main_ventana.py    solo configuran y arrancan
+main_ventana.py                      solo configura y arranca
         |
         v
-   PartidaController              decide qué hacer
-     |            |
-     v            v
-  la vista     BaseStorage      (el contrato de disco)
-     |            |
-     v            v
- PartidaView   JSONStorage
-   VistaGUI      FENStorage
- (consola)        (fen)
-  VentanaAjedrez
-     |
-     v
-  models/                        las reglas, y no saben nada de lo de arriba
+   PartidaController                  decide qué hacer
+        |
+        v
+  VentanaAjedrez                     dibuja y recoge los clics
+        |
+        v
+   models/                           las reglas, y no saben nada de lo de arriba
+        |
+storage/json_storage.py              el disco (JSON)
 ```
+
+`views/interfaz.py` (el contrato `InterfazVista`) y el bucle de menús del
+controlador siguen en el código, pero **ninguna pantalla los usa ya**. Está
+explicado en [Qué queda sin usar y por qué](#qué-queda-sin-usar-y-por-qué).
+
 
 ## Puesta en marcha
 
 No hay nada que instalar: solo la biblioteca estándar de Python.
 
 ```bash
-python main.py
-```
-
-También hay dos versiones con ventana, con la misma partida y las mismas reglas.
-Una con menús:
-
-```bash
-python main_gui.py
-```
-
-Y otra con un tablero de verdad, sin menús: se hace clic en la casilla de origen
-y en la de destino.
-
-```bash
 python main_ventana.py
 ```
 
-Al arrancar se elige en qué formato se guardan las partidas (la decisión se
-toma una vez, no en cada guardado, para no acabar con la misma partida
-partida en dos sitios).
+Esa es **la única** forma de arrancar. Se hace clic en la casilla de origen y en
+la de destino, y la jugada está hecha: no hay menús.
+
+Las partidas se guardan en `data/partidas.json`. **Ya no se pregunta el formato
+al arrancar**: antes se ofrecía JSON o FEN con un diálogo, y con la consola y la
+ventana de menús fuera no hay a quién darle la elección. Se queda el JSON, que es
+el único formato que guarda el historial y por tanto el único que permite
+deshacer. `storage/fen_storage.py` y `FENStorage` **se conservan y se prueban**:
+siguen sirviendo para exportar una posición a otro programa, aunque la ventana ya
+no los ofrezca.
 
 Para correr las pruebas:
 
@@ -56,60 +50,57 @@ Para correr las pruebas:
 python -m pytest
 ```
 
-Y, si se quiere comprobar las ventanas de verdad —que abren la ventana, dibujan
-el tablero y se contestan solas a los diálogos—:
+Y, si se quiere comprobar la ventana de verdad —que la abre, dibuja el tablero y
+se contesta sola a los clics—:
 
 ```bash
-python smoke_vista_gui.py   # la de menús
-python smoke_ventana.py     # la de botones
+python smoke_ventana.py
 ```
 
-## Las tres vistas
+`smoke_ventana.py` no forma parte de la batería de pytest porque necesita
+pantalla; en Linux sin pantalla se puede lanzar con `xvfb-run -a`.
 
-Hay tres pantallas distintas y el controlador no sabe cuál está usando. Lo
-interesante es que **no lo sabe de la misma manera** en las tres, y que por eso
-las dos formas de escrever el controlador se complementan en lugar de
-competir.
+## La vista y el contrato
 
-### Dos vistas que cumplen el mismo contrato
+Antes había tres pantallas y el controlador no sabía cuál estaba usando. Ahora
+hay **una**, y conviene explicar qué se perdió y qué se conservó, porque el
+cambio no es solo "borrar archivos".
 
-`PartidaView` (consola) y `VistaGUI` (ventana con menús) cumplen las dos el
+### Lo que había: dos vistas con menús y un hilo
+
+`PartidaView` (consola) y `VistaGUI` (ventana con menús) cumplían las dos el
 `Protocol` `InterfazVista` de `views/interfaz.py`, sin heredar la una de la
-otra. Por eso pasar de una a otra es cambiar un argumento, y en ninguno de los
+otra. Por eso pasar de una a otra era cambiar un argumento, y en ninguno de los
 dos casos hizo falta tocar el controlador.
 
-Lo que hace posible el intercambio es que **las dos cumplen el mismo
-`Protocol`**, y el contrato está en `views/` y no en `controllers/` porque
-describe lo que la vista *ofrece*, no lo que el controlador *quiere*: así la
-dependencia va en un solo sentido.
+Había además un detalle de hilo, que era lo caro de aquel diseño. El controlador
+está escrito como código **bloqueante**: pregunta `vista.menu_inicio()` y se
+queda parado hasta que alguien contesta. En consola eso no estorba, porque el
+único hilo del programa no tiene nada más que hacer. `tkinter` no puede hacerlo:
+su hilo principal dibuja, y un diálogo que espera con `wait_window()` le impediría
+hacer nada más.
 
-Y hay un detalle que no es trivial. El controlador está escrito como código
-**bloqueante**: pregunta `vista.menu_inicio()` y se queda parado hasta que
-alguien contesta. En consola eso no estorba, porque el único hilo del programa
-no tiene nada más que hacer. `tkinter` no puede hacerlo: su hilo principal
-dibuja, y un diálogo que espera con `wait_window()` le impediría hacer nada más.
+La solución era `views/hilo.py`: el controlador se ejecutaba en un hilo aparte y
+la vista traducía cada cosa que le pedían. Pintar se encolaba con `root.after` y
+no esperaba, para que el controlador siguiera avanzando; preguntar se encolaba y
+además esperaba, con un `threading.Event`. Todo el reparto vivía en un único
+método, `VistaGUI._en_hilo_principal`.
 
-La solución es `views/hilo.py`: el controlador se ejecuta en un hilo aparte y
-la vista traduce cada cosa que le piden. Pintar se encola con `root.after` y no
-espera, para que el controlador siga avanzando; preguntar se encola y además
-espera, con un `threading.Event`. Todo el reparto ocurre en un único método,
-`VistaGUI._en_hilo_principal`, y por eso el resto de la vista es idéntico en los
-dos casos.
+Ese diseño tenía un punto flojo documentado en el propio módulo, y era este: la
+vista leía `partida.tablero` desde el hilo principal mientras el controlador lo
+mutaba desde el de trabajo, sin ningún cerrojo. Funcionaba porque el GIL y porque
+cada turno acababa bloqueando en un menú, no porque estuviera protegido. Con un
+rival que calculase en segundo plano se habría roto de verdad. Borrar las dos
+vistas con menús elimina ese problema entero, no lo silencia.
 
-La consecuencia de esto es que la versión con menús **también bloquea**: sus
-menús y preguntas son diálogos modales, y por eso se puede reutilizar el
-controlador tal cual. Una ventana con botones de verdad, sin diálogos, exigiría
-convertir el controlador en generadores.
+### Lo que hay: una vista que no cumple el contrato, a propósito
 
-### Una vista que no cumple el contrato, a propósito
-
-Esa limitación era exactamente el punto de partida de `views/ventana.py`
-(`main_ventana.py`). Una ventana de ajedrez de verdad no tiene menús: tiene un
-tablero, se hace clic en dos casillas y la jugada está hecha. **No hay nada que
-preguntar.** Y si no hay nada que preguntar, el modelo de "el controlador
-pregunta y espera" se queda sin usar, y con él se cae el `PuenteHilos` entero:
-nadie espera, así que no hay nada que repartir entre el hilo que dibuja y el que
-decide. Todo corre en el hilo principal de `tkinter`, que es lo correcto.
+`views/ventana.py` es la pantalla que quedó, y **no** implementa `InterfazVista`.
+Una ventana de ajedrez de verdad no tiene menús: tiene un tablero, se hace clic en
+dos casillas y la jugada está hecha. **No hay nada que preguntar.** Y si no hay
+nada que preguntar, no hace falta ni puente de hilos: nadie espera, así que no hay
+nada que repartir entre el hilo que dibuja y el que decide. Todo corre en el hilo
+principal de `tkinter`, que es lo correcto.
 
 La relación se invierte. No es el controlador el que empuja menús hacia la
 pantalla, es la pantalla la que **tira** de las acciones del controlador cuando
@@ -122,22 +113,38 @@ botón Guardar            ->  controlador.guardar(...)
 ```
 
 Esos métodos ya existían y ya estaban probados, porque son las acciones que el
-menú de la consola llama por dentro. Lo único que faltaba era una puerta de
+menú de la consola llamaba por dentro. Lo único que faltaba era una puerta de
 entrada para las jugadas, y esa es `PartidaController.aplicar_jugada`: la misma
-validación, la misma traducción de errores y la misma comprobación de turno que
-usa la consola, pero sin la pregunta previa. `introducir_jugada` se queda como
-atajo de `aplicar_jugada(vista.pedir_jugada())` para las dos vistas que sí
-preguntan.
+validación, la misma traducción de errores y la misma comprobación de turno, pero
+sin la pregunta previa. `introducir_jugada` se queda como atajo de
+`aplicar_jugada(vista.pedir_jugada())` para el bucle de menús.
 
-Y `InterfazVista` se queda como estaba, cumpliendo su promesa de siempre. Esta
-ventana **no** lo cumple, y es deliberado: no es intercambiable con las otras
-dos —no se le puede poner un `PartidaView` debajo, ni al revés—, así que
-declarar que lo cumpliría sería mentir, y un `Protocol` que miente es peor que
-no tener contrato. Lo que sí comparte con el resto es lo que importa: `models/`
-no sabe que esto existe, `storage/` tampoco, y el controlador no ha tenido que
-cambiar de forma para acomodar a una tercera pantalla. La diferencia entre una
-ventana con menús y una con botones está entera en la vista, que es donde
-debería estar.
+Lo que sí comparte con el resto es lo que importa: `models/` no sabe que esto
+existe, `storage/` tampoco, y el controlador no ha tenido que cambiar de forma
+para acomodar la pantalla.
+
+### Qué queda sin usar y por qué
+
+Borrar las dos vistas con menús deja código que ya no ejecuta nadie. Se conserva,
+y se apunta aquí para que quede como decisión y no como descuido:
+
+| Qué | Por qué se queda |
+|---|---|
+| `InterfazVista` (`views/interfaz.py`) | El bucle de menús del controlador está escrito y probado contra él. Si se borrara el contrato, se caerían sus pruebas. |
+| `OPCIONES_INICIO` / `OPCIONES_PARTIDA` / `OPCIONES_ARCHIVO` | Son los datos de esos menús, y viven en el mismo módulo. |
+| `ejecutar` / `jugar` / `gestionar_archivos` del controlador | Mismo motivo: sus pruebas siguen en pie y documentan cómo se conversa con una persona. |
+| `introducir_jugada` | Atajo de `aplicar_jugada` para el bucle de menús. |
+| `FENStorage` | Formato estándar para exportar a otro programa. Ya no se ofrece en la ventana, pero se prueba. |
+
+**Propuesta de poda** (no aplicada, porque es una decisión de alcance y no un
+detalle): si el proyecto ya no va a recuperar los menús, todo lo de la tabla
+anterior se puede ir en un solo commit —`views/interfaz.py` entero, el bucle de
+menús del controlador y `tests/test_controlador.py` con lo que lo prueba—, y el
+proyecto quedaría con una sola forma de hablar con la persona. El precio sería
+perder unas 70 pruebas que hoy vigilan la traducción de errores y el guardado, así
+que **no lo he hecho**: no es una limpieza, es un recorte de funcionalidad, y
+decide quien lleva el proyecto.
+
 
 ## Cómo se juega
 
@@ -201,9 +208,7 @@ jugar por no poder guardar, pero tampoco hay por qué tumbar el programa.
 ## Estructura
 
 ```
-main.py                     Configura y arranca (consola). Nada más.
-main_gui.py                 Configura y arranca (ventana con menús).
-main_ventana.py             Configura y arranca (ventana con botones).
+main_ventana.py             Configura y arranca. Nada más.
 models/                     Las reglas. No saben qué es un menú ni un archivo.
   enums.py                  Color, TipoPieza, EstadoPartida.
   errores.py                Los errores del dominio.
@@ -213,17 +218,15 @@ models/                     Las reglas. No saben qué es un menú ni un archivo.
   partida.py                Una partida: turno, jaque, finales, FEN, historial.
 storage/                    Lo único que toca el disco.
   base_storage.py           El contrato. Sin implementación.
-  json_storage.py           Implementación en un archivo JSON.
-  fen_storage.py            Implementación en archivos .fen.
+  json_storage.py           Implementación en un archivo JSON. La que usa la ventana.
+  fen_storage.py            Implementación en archivos .fen. Se conserva, no se ofrece.
 views/
   interfaz.py               El contrato (Protocol) y las opciones de menú.
-  partida_view.py           La consola. Cumple el contrato.
-  vista_gui.py              La ventana de menús (tkinter). Cumple el contrato.
-  hilo.py                   El puente que la pone en marcha sin bloquearla.
+                            Sin pantalla que lo cumpla: ver "Qué queda sin usar".
   ventana.py                La ventana jugable, de botones. No cumple el contrato.
 controllers/
   partida_controller.py     Une las tres y decide qué hacer.
-tests/                      636 pruebas.
+tests/                      626 pruebas.
 ```
 
 La regla que sostiene el diseño: **el modelo no importa nada de las otras
@@ -241,21 +244,20 @@ Las pruebas de almacenamiento están **parametrizadas sobre los dos formatos**
 (la misma batería, una vez contra JSON y otra contra FEN), que es la forma
 barata de comprobar que la separación por contrato es real y no de palabra.
 
-Las de la vista comprueban una promesa y no un resultado: que `PartidaView` y
-`VistaGUI` tienen los mismos métodos públicos, y que una clase que le falte
-uno se detecta como lo que es. La lista de métodos está escrita a mano en
-`tests/test_interfaz.py`, a propósito: si alguien añade un método al contrato,
-esa lista deja de cuadrar y hay que decidir qué vista lo implementa, en vez de
-que se rompa más tarde en mitad de una partida.
+Las del controlador comprueban la coordinación con dobles: una vista que
+registra lo escrito y un almacenamiento en memoria, así que ni la consola ni el
+disco entran en juego. Entre ellas siguen las que verifican que los menús no
+dejan huecos en la numeración y que la ayuda es siempre la opción 8: esos datos
+viven en `views/interfaz.py` y se han conservado aunque las vistas se fueran
+(ver "Qué queda sin usar").
 
-Lo que las ventanas no pueden comprobarse sin pantalla, así que no está en la
-batería: que dibujen el tablero y que un hilo de verdad maneje una de ellas.
-Eso está en `smoke_vista_gui.py` y en `smoke_ventana.py`, que se ejecutan a
-mano, abren la ventana y se contestan a sí mismas. La segunda apareció porque
-la primera destapó el único fallo real de todo esto, y fue del arnés y no del
-programa.
+Lo que la ventana no puede comprobarse sin pantalla, así que no está en la
+batería: que dibuje el tablero y que un clic mueva la pieza correcta. Eso está
+en `smoke_ventana.py`, que se ejecuta a mano, abre la ventana y se contesta a sí
+misma. En un equipo sin pantalla se puede lanzar con `xvfb-run -a
+python smoke_ventana.py`, que es como lo ejecuta la CI.
 
-Lo que sí entra en la batería, y con 658 pruebas, es lo que la ventana jugable
+Lo que sí entra en la batería, y con 626 pruebas, es lo que la ventana jugable
 sí tiene detrás: el **mapeo de píxeles a casillas**. Es lo único que la
 ventana calcula por su cuenta y lo único que un fallo hace que parezca un
 fallo de las reglas, así que se comprueba entero y sin pantalla: dónde cae
@@ -365,15 +367,18 @@ para una IA es la búsqueda y su cacheo, no más velocidad de generación.
 ## Limitaciones
 
 - **No hay motor rival.** Se juega con un solo color contra uno mismo, pensado
-  para practicar reglas. `main.py` señala dónde se añadiría un motor como
+  para practicar reglas. `main_ventana.py` señala dónde se añadiría un motor como
   cuarto colaborador del controlador.
 - **Sin reloj** ni control de tiempo.
 - **Sin variantes**: ni tres-tablas, ni rey a la isla, ni captura del rey.
 - **Un solo jugador por partida**: no hay juego en red ni por turnos locales.
-- La ventana de menús usa **diálogos modales**, no botones: es lo que permite
-  reutilizar el controlador sin reescribirlo, y el precio es que la partida no
-  avanza mientras un menú está abierto. La ventana de botones no paga ese
-  precio, porque no usa el contrato; a cambio, no es intercambiable con las
-  otras dos vistas.
-- El menú de gestión de archivos no permite cambiar el formato con las partidas
-  ya guardadas; el formato se elige al arrancar.
+- **Solo se guarda en JSON.** `FENStorage` sigue existiendo y probado, pero la
+  ventana no lo ofrece: el formato se decide en el arranque, sin preguntar.
+- **Sin consola.** No hay forma de jugar en modo texto. Es una pérdida real de
+  comodidad para depurar y para jugar en una máquina sin escritorio gráfico, y se
+  aceptó a conciencia al dejar una sola forma de arrancar. Si vuelve a hacer
+  falta, `PartidaController.aplicar_jugada` y compañía son la puerta: una
+  `PartidaView` nueva no tocaría ni las reglas ni el controlador.
+- Queda código sin uso tras borrar las vistas con menús (el contrato y el bucle
+  de menús del controlador). Ver [Qué queda sin usar y por qué](#qué-queda-sin-usar-y-por-qué).
+
