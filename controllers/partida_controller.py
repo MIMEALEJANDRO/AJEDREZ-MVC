@@ -234,13 +234,32 @@ class PartidaController:
                 self.vista.mostrar_mensaje("  Se vuelve al menú principal.")
                 return
 
-    def nueva_partida(self) -> None:
-        """Empieza una partida nueva desde la posición inicial."""
-        self.partida.reiniciar()
+    def nueva_partida(self, color: Color | None = None) -> None:
+        """Empieza una partida nueva desde la posición inicial.
+
+        ``color`` es con qué bando se va a jugar. Si no se indica, se pregunta a
+        la vista (que es lo que hace el bucle de menús). La ventana jugable lo
+        pasa explícitamente, porque ahí el bando ya está elegido en un selector
+        y no hay nada que preguntar.
+
+        Lo importante de este método es que **el turno inicial y el bando tienen
+        que ser coherentes entre sí**. Si quien juega con negras, la partida
+        empieza con las negras: si empezara con las blancas, el controlador
+        rechazaría la jugada de las negras por no ser su turno y la partida
+        quedaría bloqueada desde el primer movimiento. Ese era el bug, y por eso
+        el turno se le pasa a ``Partida.reiniciar`` en vez de dejarlo puesto a
+        mano después.
+
+        Con ``None`` ("los dos colores") no hay bando, así que se empieza como
+        siempre, con las blancas.
+        """
+        if color is None:
+            color = self.vista.elegir_color()
+        self.color_jugador = color
         # Se olvida la clave guardada: es otra partida y no debe reemplazar a
         # la anterior en el almacenamiento.
         self.clave_guardada = None
-        self.color_jugador = self.vista.elegir_color()
+        self.partida.reiniciar(turno=color if color is not None else Color.BLANCO)
 
     # ------------------------------------------------------------------
     # Jugadas

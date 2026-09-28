@@ -1,4 +1,4 @@
-# Ajedrez MVC
+﻿# Ajedrez MVC
 
 Ajedrez escrito en Python, con las reglas completas y sin ninguna dependencia
 externa. El interés del proyecto no es el ajedrez: es la **arquitectura**, que
@@ -379,6 +379,15 @@ para una IA es la búsqueda y su cacheo, no más velocidad de generación.
   aceptó a conciencia al dejar una sola forma de arrancar. Si vuelve a hacer
   falta, `PartidaController.aplicar_jugada` y compañía son la puerta: una
   `PartidaView` nueva no tocaría ni las reglas ni el controlador.
+- **Jugar con un solo bando, sin rival, solo deja hacer una de cada dos jugadas.**
+  Es el comportamiento que fija `color_jugador`: si juegas con negras, el
+  controlador no te deja mover las blancas, así que después de tu jugada el
+  turno se te escapa hasta la siguiente. Para practicar está el modo "Los dos
+  colores", que es el único en el que se juega una partida entera. **Aviso, sin
+  cambios aplicados**: el selector arranca en "Blancas", y para una aplicación
+  cuyo fin es practicar reglas eso es un mal punto de partida. Lo razonable sería
+  arrancar en "Los dos colores" (una línea) o pedir el bando al empezar, pero es
+  una decisión de uso y no la he tomado por mi cuenta.
 - Queda código sin uso tras borrar las vistas con menús (el contrato y el bucle
   de menús del controlador). Ver [Qué queda sin usar y por qué](#qué-queda-sin-usar-y-por-qué).
 

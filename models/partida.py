@@ -387,14 +387,29 @@ class Partida:
         self.motivo = f"Las {self.turno.nombre_legible.lower()} abandonaron"
         self.ganador = self.turno.contrario
 
-    def reiniciar(self) -> None:
+    def reiniciar(self, turno: Color = Color.BLANCO) -> None:
         """Empieza una partida nueva desde la posición inicial.
 
         Se reinicia llamando al propio ``__init__``: es la forma de garantizar
         que la partida nueva tiene *exactamente* el mismo estado que una recién
         creada, sin tener que acordarse de poner a cero cada atributo.
+
+        ``turno`` es a quién le toca la primera jugada, y por defecto son las
+        blancas, como en el ajedrez normal. Existe el parámetro para el caso de
+        practicar con un solo bando: si quien juega elige negras, la partida tiene
+        que **empezar con las negras**, porque si no el turno sería de las blancas
+        y ninguna jugada suya sería legal (el controlador rechaza las del color
+        contrario), con lo que la partida quedaría bloqueada desde el primer
+        momento.
+
+        Ojo con lo que NO se toca: ``numero_movimiento`` sigue valiendo 1. En el
+        FEN, el número de jugada es la de la pareja blanca+negra, así que si
+        empiezan las negras, tras su primera jugada el contador sube a 2. Es lo
+        que dice el estándar y no merece la pena inventar otra cosa.
         """
         self.__init__()
+        if turno is not Color.BLANCO:
+            self.turno = turno
 
     def esta_terminada(self) -> bool:
         """True si la partida ya no admite más jugadas."""

@@ -168,10 +168,12 @@ class VentanaAjedrez:
         # permite practicar con los dos bandos en la misma partida.
         self.color: Color | None = Color.BLANCO
         self.girada = False
-        # El controlador lleva su propio color de jugador y arranca en ``None``
-        # (juegan los dos). Se pone aquí el mismo que el de la ventana para que
-        # las dos vistas de "quién juega" no puedan discrepar.
-        self.controlador.color_jugador = self.color
+        # El bando y el turno de la partida se ponen de acuerdo pasando por el
+        # controlador, no asignando las dos cosas por separado: es el quien sabe
+        # que si el bando es negro el turno inicial tiene que ser el negro. Con
+        # blanco (el valor de arriba) esto no cambia nada, pero deja el invariante
+        # en un solo sitio desde el primer momento.
+        self.controlador.nueva_partida(self.color)
 
         self._construir()
         self._refrescar()
@@ -650,10 +652,10 @@ class VentanaAjedrez:
     # ------------------------------------------------------------------
 
     def _al_cambiar_color(self) -> None:
+        anterior = self.color
         self.color = {"blancas": Color.BLANCO, "negras": Color.NEGRO, "ambas": None}[
             self.opciones_color.get()
         ]
-        self.controlador.color_jugador = self.color
         # El tablero se coloca solo con el color elegido abajo: quien juega con
         # negras ve sus piezas en su lado, que es como se juega de verdad. Con
         # "los dos colores" no hay bando propio, así que se deja como esté
@@ -664,17 +666,63 @@ class VentanaAjedrez:
         # en curso deja de tener sentido.
         self.origen = None
         self.destinos = []
+
+        # El bando y el turno de la partida tienen que seguir de acuerdo. Si se
+        # cambia el bando con la partida ya empezada, el turno se queda en el
+        # color de antes y la partida vuelve a quedar bloqueada (ninguna jugada
+        # sería legal: por el turno unas, por el bando las otras). Por eso se
+        # vuelve a pasar por el controlador, que es quien pone las dos cosas en
+        # su sitio. Preguntar antes es solo por no perder la partida en curso sin
+        # querer.
+        if self._hay_jugadas() and not self._confirmar_cambio_de_bando(anterior):
+            # Se cancela el cambio: se vuelve al bando anterior, y también el
+            # botón de radio, que si no se quedaría marcando lo que no es.
+            self.color = anterior
+            if anterior is not None:
+                self.girada = anterior is Color.NEGRO
+            self.opciones_color.set(self._clave_de_color(anterior))
+            self._refrescar()
+            return
+
+        self.controlador.nueva_partida(self.color)
         self._refrescar()
+
+    def _hay_jugadas(self) -> bool:
+        """True si la partida ha empezado (o ya terminó) y se perdería al reiniciar."""
+        partida = self.controlador.partida
+        return bool(partida.historial) or partida.esta_terminada()
+
+    def _clave_de_color(self, color: Color | None) -> str:
+        """El valor del botón de radio que corresponde a un color."""
+        if color is Color.NEGRO:
+            return "negras"
+        if color is Color.BLANCO:
+            return "blancas"
+        return "ambas"
+
+    def _confirmar_cambio_de_bando(self, anterior: Color | None) -> bool:
+        """Pregunta si se puede cambiar de bando teniendo la partida empezada."""
+        antes = self._clave_de_color(anterior)
+        return bool(
+            messagebox.askyesno(
+                "Cambiar de bando",
+                f"La partida tiene jugadas y cambiarla de bando la reinicia.\n\n"
+                f"¿Empezar una partida nueva jugando con {antes}?",
+                parent=self.root,
+            )
+        )
 
     def _girar(self) -> None:
         self.girada = not self.girada
         self._refrescar()
 
     def _nueva_partida(self) -> None:
-        self.controlador.partida.reiniciar()
-        # La clave guardada se olvida porque es otra partida; si no, el siguiente
-        # guardado intentaría reemplazar la anterior.
-        self.controlador.clave_guardada = None
+        # Se llama al controlador y no se reinicia la partida a mano. La
+        # diferencia no es de estilo: el controlador es quien tiene que poner de
+        # acuerdo el bando elegido con el turno inicial (si juegas con negras,
+        # empiezan las negras), y si la vista reinicia por su cuenta se queda
+        # sin esa mitad y la partida vuelve a bloquearse.
+        self.controlador.nueva_partida(self.color)
         self.origen = None
         self.destinos = []
         self._anotar("Partida nueva.")
