@@ -1,0 +1,92 @@
+# Ejecución automática: pruebas y perft en cada push.
+#
+# Son las dos comprobaciones que ya existen en el proyecto y que se ejecutan a
+# mano, pero que en la práctica no se ejecutaban a mano. Con esto, un error de
+# reglas o una regresión grande de rendimiento la ve el push, no la siguiente
+# persona que abra el proyecto.
+#
+# Las dos líneas que importan:
+#
+#   python -m pytest
+#   python perft_ajedrez.py --profundidad 3
+#
+# La segunda es la que cuesta (unos 50 s aquí, el doble en un runner lento), por
+# eso no se repite en cada versión de Python: `pytest` ya incluye pruebas de
+# perft en `tests/test_perft.py` (perft(1) y perft(2) en las seis posiciones, y
+# perft(3) en las dos baratas), así que la matriz también vigila las reglas.
+
+name: Pruebas
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pruebas:
+    # La matriz cubre el mínimo declarado en pyproject.toml (3.10) y la última
+    # versión. Probar 3.10 no es un capricho: el bug de `from __future__
+    # import annotations` en models/enums.py solo se maniesta antes de la 3.14
+    # (en la 3.14 las anotaciones son perezosas por el PEP 649 y el fallo queda
+    # oculto), así que la 3.10 es la única forma de que la CI lo detecte.
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # No se instala el proyecto con `pip install -e .` a propósito: no hay
+      # backend de empaquetado y no hace falta, porque `pyproject.toml` ya tiene
+      # `pythonpath = ["."]` para pytest y el programa se ejecuta desde la raíz.
+      - name: Instalar pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Comprobar la versión de Python
+        run: python -VV
+
+      - name: Ejecutar las pruebas
+        run: python -m pytest
+
+  perft:
+    # El generador de jugadas contra los valores de referencia de python-chess.
+    # `--profundidad 3` a propósito: la profundidad por defecto (4) son 197.281
+    # rutas en la posición inicial y 4.085.603 en Kiwipete, y en la práctica
+    # son horas. Con la 3, la tabla entera va en menos de un minuto y sigue
+    # detectando cualquier error de regla, que es para lo que está.
+    name: perft (reglas de movimiento)
+    runs-on: ubuntu-latest
+    # Es lo que hace de alarma de rendimiento: si la generación de jugadas se
+    # degrada mucho, el perft no cabe en diez minutos y el trabajo falla.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Ejecutar perft
+        run: python perft_ajedrez.py --profundidad 3
+
+      # Lo que la CI NO puede hacer, y conviene no creer que hace: detectar una
+      # regresión de rendimiento *fina*. Los tiempos del runner no son
+      # comparables entre ejecuciones (varían con la carga de la máquina), así
+      # que un umbral de segundos daría falsos positivos que la gente acabaría
+      # silenciando. Lo que sí hay:
+      #   - el log, que deja los tiempos a la vista para compararlos a ojo,
+      #   - el `timeout-minutes` de arriba, que es lo que atrapa una regresión
+      #     grande: si la generación de jugadas se degrada x10, el perft se pasa
+      #     de los diez minutos y el trabajo falla.
+      # Para vigilar el rendimiento de verdad haría falta un benchmark con
+      # margen de ruido, no un test: es trabajo aparte.

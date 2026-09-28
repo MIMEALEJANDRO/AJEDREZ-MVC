@@ -35,6 +35,67 @@ Por qué el puente está en ``views/`` y no en ``controllers/``: el hilo es un
 problema *de la pantalla*. Si el controlador supiera de hilos, la consola
 —que no quiere ninguno— pagaría las consecuencias. Aquí el controlador sigue
 sin saber si hay uno, un hilo, o veinte.
+
+El modelo y los hilos: qué es seguro hoy y qué no
+------------------------------------------------
+
+Esta nota está porque la pregunta "¿esto aguanta un rival que calcula en
+segundo plano?" tiene una respuesta incómoda: **hoy aguanta, pero por casualidad
+y no por construcción.** Mejor escrito que supuesto.
+
+Dónde se usa el puente. Solo en ``main_gui.py``. ``main_ventana.py`` no lo usa:
+ahí todo corre en el hilo principal de ``tkinter``, a propósito, porque esa
+ventana no tiene diálogos modales y por tanto no hay nada que esperar.
+
+El reparto de hoy. En ``main_gui`` las dos vistas leen la partida desde el hilo
+principal: ``mostrar_tablero`` pinta el tablero leyendo ``partida.tablero``
+casilla a casilla, y ese ``partida`` es el mismo objeto vivo que el controlador
+posee y muta en el hilo de trabajo. **No hay ningún cerrojo.**
+
+Por qué no se nota. Por dos cosas, y las dos son accidentales:
+
+* El GIL: en CPython solo se ejecuta bytecode de un hilo a la vez.
+* El controlador termina **siempre** en una llamada que bloquea
+  (``menu_partida()`` y las de su estilo encolan con ``root.after`` y esperan con
+  un ``threading.Event``). Así que el hilo de trabajo acaba aparcado mientras el
+  hilo principal ejecuta los pintados que había encolado.
+
+Y aquí está el punto flaco: ``_pintar`` usa ``esperar=False`` a propósito, para
+que "el controlador pueda seguir avanzando mientras la ventana se redibuja". O
+sea que el diseño sí permite los dos hilos a la vez, y es el GIL y el hecho de
+que cada turno acabe bloqueando lo que evita que se pisen. Si el GIL cambiar de
+hilo entre dos operaciones de ``Tablero._aplicar``, un pintado podría ver un
+tablero a medio aplicar.
+
+Qué pasaría con un rival que calcula
+------------------------------------
+
+Si el controlador calculase la jugada del rival en el hilo de trabajo **sin**
+bloquear en un menú, esto se rompe de verdad: el hilo de trabajo mutaría
+``partida.tablero`` (una búsqueda son miles de posiciones) mientras el hilo
+principal sigue pintando y atendiendo los clics. Los síntomas serían elusivos
+—un tablero a medio aplicar, una jugada que se pierde, un ``MovimientoIlegal``
+en un sitio que no se explica— y no saldrían en las pruebas, porque las
+pruebas no tienen rival.
+
+Cómo se arreglaría, cuando haga falta (no ahora, y no aquí)
+-----------------------------------------------------------
+
+Las dos opciones, y cuál conviene en cada caso:
+
+* **Que la búsqueda trabaje sobre una copia y devuelva solo un resultado.** Es la
+  que menos toca: el hilo de trabajo calcula sobre un tablero propio y le pasa
+  al hilo principal un ``Movimiento`` (un valor, inmutable). La partida viva no
+  se toca hasta que el jugador (o el rival) mueve, y eso ya pasa por el camino
+  normal. Es lo que hacen los motores de verdad y evita el cerrojo por completo.
+* **Un cerrojo (``threading.Lock``) alrededor de la partida**, y que lo tomen
+  las operaciones que la tocan. Funciona, pero es peor: serializa el pintado con
+  la búsqueda, así que la ventana se quedaría congelada mientras el rival
+  piensa, que es justo lo que el hilo se pretendía evitar.
+
+Nada de las dos se hace aquí, porque hoy no hace falta y porque toca una pieza
+(la vista) que funciona. Queda escrito para que quien añada el rival no lo haga
+sin querer.
 """
 
 from __future__ import annotations

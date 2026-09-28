@@ -29,6 +29,41 @@ número y se escribe una conversión para el formato viejo.
 
 El orden de las claves es el inverso al de escritura, así que la más reciente
 queda la primera y ``listar`` no necesita reordenar nada.
+
+Hasta dónde aguanta este formato
+--------------------------------
+
+Un único archivo con todo tiene un coste que conviene dejar escrito con
+números, porque es un O(n) por operación: cada ``guardar`` lee el archivo entero,
+deserializa **todas** las partidas y vuelve a escribir **todas**. Medido con
+partidas de 36 jugadas (unos 5,6 KB cada una en el archivo):
+
+    partidas   tamaño     guardar    listar
+         10     56 KB     7,9 ms    5,0 ms
+         50    280 KB    31,7 ms   23,0 ms
+        100    561 KB    63,3 ms   45,7 ms
+        200  1,1 MB    121,5 ms   93,1 ms
+        400  2,2 MB    268,8 ms  220,8 ms
+        800  4,5 MB    636,8 ms  504,8 ms
+
+La relación es perfectamente lineal, como tiene que ser. El punto en el que se
+empieza a notar es **alrededor de 200-400 partidas**: medio segundo en cada
+guardado es perceptible cuando se guarda al cambiar de turno, y a partir de ahí
+cada partida nueva cuesta más que todas las anteriores juntas.
+
+Para el alcance de este programa eso no llega a pasar: es un juego de consola
+para practicar reglas, donde una persona guarda unas cuantas partidas por
+sesión y el archivo se puede borrar desde el propio menú. Por eso **no** se
+reescribe a SQLite ni se parte en un archivo por partida, que además
+perderían la ventaja de poder abrir el JSON a mano y leerlo.
+
+Si algún día hicieran falta miles de partidas, el sitio donde mirar es este
+módulo y el cambio natural es un archivo por partida (o SQLite), porque
+``BaseStorage`` ya está preparado: el contrato es ``_leer_todas`` /
+``_escribir_todas``, y cambiar cómo se guardan por debajo no obliga a tocar ni el
+controlador ni la vista. Ese día también habría que decidir qué se hace con los
+archivos que ya están en el formato antiguo, que es justo para lo que está la
+clave ``"version"`` de arriba.
 """
 
 from __future__ import annotations
