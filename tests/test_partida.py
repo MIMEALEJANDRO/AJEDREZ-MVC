@@ -88,7 +88,7 @@ class TestJaqueMate:
     def test_detecta_el_jaque_mate(self):
         partida = Partida.desde_fen(self.MATE_EN_UNA)
         partida.mover("a1", "a8")
-        assert partida.estado is EstadoPartida.JQUE_MATE
+        assert partida.estado is EstadoPartida.JAQUE_MATE
         assert partida.ganador is Color.BLANCO
         assert "jaque mate" in partida.motivo
 
@@ -530,7 +530,7 @@ class TestSerializacionDePartida:
         partida = Partida.desde_fen("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1")
         partida.mover("a1", "a8")
         copia = Partida.from_dict(partida.to_dict())
-        assert copia.estado is EstadoPartida.JQUE_MATE
+        assert copia.estado is EstadoPartida.JAQUE_MATE
         assert copia.esta_terminada() is True
 
     def test_rechaza_datos_invalidos(self):

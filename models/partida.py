@@ -516,7 +516,7 @@ class Partida:
             # que en ambos casos el que tiene el turno es el que pierde o
             # empata, así que el ganador es el contrario.
             if self.esta_en_jaque():
-                self.estado = EstadoPartida.JQUE_MATE
+                self.estado = EstadoPartida.JAQUE_MATE
                 self.ganador = self.turno.contrario
                 self.motivo = f"El rey {self.turno.nombre_legible.lower()} quedó en jaque mate"
             else:

@@ -85,7 +85,7 @@ class TestEstadoPartida:
 
     def test_terminada_para_todo_menos_en_curso(self):
         assert EstadoPartida.EN_CURSO.terminada is False
-        for estado in (EstadoPartida.JQUE_MATE, EstadoPartida.AHOGADO,
+        for estado in (EstadoPartida.JAQUE_MATE, EstadoPartida.AHOGADO,
                        EstadoPartida.TABLAS, EstadoPartida.ABANDONO):
             assert estado.terminada is True
 

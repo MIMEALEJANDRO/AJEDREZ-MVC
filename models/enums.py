@@ -5,6 +5,8 @@ dominio. Al ser ``Enum``, comparar es seguro (``es`` / ``is``), el repr es
 legible al depurar y se serializan sin problemas en JSON (guardando ``.value``).
 """
 
+from __future__ import annotations
+
 from enum import Enum
 
 
@@ -86,7 +88,7 @@ class EstadoPartida(Enum):
     """Situación de la partida; se recalcula después de cada jugada."""
 
     EN_CURSO = "en curso"
-    JQUE_MATE = "jaque mate"
+    JAQUE_MATE = "jaque mate"
     AHOGADO = "ahogado"
     TABLAS = "tablas"
     ABANDONO = "abandono"
@@ -149,7 +151,7 @@ LETRAS_FEN_INVERSAS = {letra.lower(): tipo for (tipo, _), letra in LETRAS_FEN.it
 # ``EstadoPartida.nombre_legible`` la consulta.
 ETIQUETAS_ESTADO = {
     EstadoPartida.EN_CURSO: "En curso",
-    EstadoPartida.JQUE_MATE: "Jaque mate",
+    EstadoPartida.JAQUE_MATE: "Jaque mate",
     EstadoPartida.AHOGADO: "Ahogado (tablas por rey sin salida)",
     EstadoPartida.TABLAS: "Tablas",
     EstadoPartida.ABANDONO: "Abandono",

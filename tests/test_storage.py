@@ -152,7 +152,7 @@ class TestContratoComun:
         partida = Partida.desde_fen("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1")
         partida.mover("a1", "a8")
         clave = storage.guardar(partida)
-        assert storage.cargar(clave).estado is EstadoPartida.JQUE_MATE
+        assert storage.cargar(clave).estado is EstadoPartida.JAQUE_MATE
 
     def test_los_derechos_de_enroque_sobreviven_al_viaje(self, storage):
         # Los derechos de enroque no se deducen de las piezas (dependen del

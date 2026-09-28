@@ -1,3 +1,14 @@
+[project]
+# Sección mínima: no se empaqueta ni se publica nada, pero declara de forma
+# explícita qué es el proyecto y con qué versión de Python se ha probado. Sin
+# esto, cualquier herramienta que lea `pyproject.toml` (editores, CI,
+# `pip install -e .`) no tiene forma de saber el mínimo requerido.
+name = "ajedrez-mvc"
+version = "0.1.0"
+description = "Ajedrez de consola con arquitectura MVC: modelo sin IO, vistas intercambiables y persistencia en JSON y FEN."
+requires-python = ">=3.10"
+dependencies = []
+
 [tool.pytest.ini_options]
 # `pythonpath = ["."]` es lo que permite que las pruebas hagan
 # `from models import Partida` sin instalar el proyecto. Sin esta línea,

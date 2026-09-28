@@ -317,7 +317,7 @@ class TestIntroducirJugada:
         controlador.partida = Partida.desde_fen("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1")
         vista.respuestas = ["a1a8"]
         controlador.introducir_jugada()
-        assert controlador.partida.estado is EstadoPartida.JQUE_MATE
+        assert controlador.partida.estado is EstadoPartida.JAQUE_MATE
         assert "jaque mate" in vista.texto()
 
 
