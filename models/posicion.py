@@ -25,7 +25,7 @@ DESPLAZAMIENTOS_REY = ((0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 
 DESPLAZAMIENTOS_CABALLO = ((1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2))
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True, order=True, slots=True)
 class Posicion:
     """Casilla del tablero identificada por columna (0=a .. 7=h) y fila (0=1 .. 7=8).
 
@@ -34,6 +34,20 @@ class Posicion:
     dataclass genera ``__eq__``/``__hash__``, se puede usar directamente como
     clave de diccionario, que es justo lo que hace ``Tablero`` para guardar
     "casilla -> pieza".
+
+    Decisiones de rendimiento que no se ven al usarla
+    -------------------------------------------------
+
+    ``Posicion`` es la pieza de datos más caliente del motor, y estas dos
+    decisiones no cambian lo que la clase hace, solo cuánto cuesta:
+
+    * ``slots=True``: sin el diccionario de atributos que Python guarda por
+      defecto en cada objeto. Acceder a ``.columna`` es más rápido y cada casilla
+      ocupa menos memoria.
+    * ``__hash__`` escrito a mano, en vez del que genera el dataclass. El
+      automático es ``hash((columna, fila))``, que **crea una tupla en cada
+      llamada**; y como ``Posicion`` es la clave del diccionario de piezas, ese
+      hash se calcula millones de veces en un perft. Aquí es una multiplicación.
     """
 
     columna: int
@@ -53,6 +67,19 @@ class Posicion:
             raise ErrorAjedrez("La columna debe estar entre 0 (a) y 7 (h).")
         if not 0 <= self.fila <= 7:
             raise ErrorAjedrez("La fila debe estar entre 0 (1) y 7 (8).")
+
+    def __hash__(self) -> int:
+        """Un entero por casilla, sin construir ninguna tupla.
+
+        ``columna * 8 + fila`` da un número distinto para cada una de las 64
+        casillas (las dos coordenadas van de 0 a 7), así que dos casillas con el
+        mismo valor dan siempre el mismo hash, que es lo único que un
+        diccionario necesita para funcionar bien.
+
+        Al estar el método escrito aquí, el ``__hash__`` que genera el
+        ``dataclass`` no lo pisa: se respeta el de la clase.
+        """
+        return self.columna * 8 + self.fila
 
     @classmethod
     def desde_notacion(cls, texto: str) -> Posicion:
@@ -91,12 +118,20 @@ class Posicion:
         Devolver ``None`` en vez de lanzar excepción es deliberado: al generar
         movimientos hay que "caminar" por el tablero y basta con ignorar los
         destinos que se salen, sin manejar excepciones dentro de los bucles.
+
+        La casilla que se devuelve sale de ``CASILLAS``, el catálogo de las 64
+        casillas de más abajo, en vez de construir una nueva. Como la clase es
+        inmutable, compartir el objeto no cambia nada: dos llamadas que llegan a
+        la misma casilla devuelven la misma ``Posicion``, que se puede comparar
+        con ``es`` y que además busca más rápido en un diccionario. Al generar
+        movimientos esto se llama cientos de miles de veces por partida, y cada
+        construcción nueva tenía que pagar la validación de ``__post_init__``.
         """
         nueva_columna = self.columna + columnas
         nueva_fila = self.fila + filas
         if not (0 <= nueva_columna <= 7 and 0 <= nueva_fila <= 7):
             return None
-        return Posicion(nueva_columna, nueva_fila)
+        return CASILLAS[nueva_fila * 8 + nueva_columna]
 
     def vecinos(self) -> list[Posicion]:
         """Las ocho casillas adyacentes que están dentro del tablero."""
@@ -118,6 +153,23 @@ class Posicion:
 
     def __str__(self) -> str:
         return self.notacion
+
+
+# Catálogo de las 64 casillas, en el orden que usa ``desplazar``: primero la
+# fila y dentro de ella la columna, así que la casilla (columna, fila) está en
+# la posición ``fila * 8 + columna``.
+#
+# Se construye una vez, al importar el módulo, y ``desplazar`` devuelve de aquí
+# en lugar de crear una ``Posicion`` nueva. Es seguro compartir los objetos
+# porque la clase es inmutable (``frozen=True``): no hay forma de que dos
+# tableros se estorben por tener la misma casilla.
+#
+# Las casillas que se construyan a mano (``Posicion(3, 4)``) siguen siendo
+# válidas y se comparan bien con las del catálogo, porque ``__eq__`` y
+# ``__hash__`` funcionan por valor y no por identidad.
+CASILLAS: tuple[Posicion, ...] = tuple(
+    Posicion(columna, fila) for fila in range(8) for columna in range(8)
+)
 
 
 @dataclass(frozen=True)

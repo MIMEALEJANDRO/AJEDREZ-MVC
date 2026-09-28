@@ -255,7 +255,7 @@ mano, abren la ventana y se contestan a sí mismas. La segunda apareció porque
 la primera destapó el único fallo real de todo esto, y fue del arnés y no del
 programa.
 
-Lo que sí entra en la batería, y con 283 pruebas, es lo que la ventana jugable
+Lo que sí entra en la batería, y con 658 pruebas, es lo que la ventana jugable
 sí tiene detrás: el **mapeo de píxeles a casillas**. Es lo único que la
 ventana calcula por su cuenta y lo único que un fallo hace que parezca un
 fallo de las reglas, así que se comprueba entero y sin pantalla: dónde cae
@@ -265,6 +265,102 @@ responde al clic **sean el mismo objeto y no tres copias**. Ese último caso es
 el que importa: si cada uno calculara su propia cuenta, bastaría con invertir
 una fila en uno de los dos para que se clicaran casillas distintas de las que
 se ven.
+
+## Rendimiento y límites conocidos
+
+Esta sección existe para que nadie descubra por sorpresa hasta dónde escala el
+motor. Las cifras son de un `perft(3)` con Python 3.14 en un portátil corriente,
+y se miden con `python perft_ajedrez.py --profundidad 3`.
+
+### Qué es el perft y por qué es la medida
+
+`perft(n)` cuenta cuántas rutas de `n` jugadas legales hay desde una posición. No
+es un test de rendimiento "normal": es la medida más dura que hay, porque obliga
+a que la generación de jugadas sea correcta en todos los casos a la vez (jaque,
+enroque, captura al paso, promoción) y a que además sea rápida. Si el número
+cuadra y tarda lo que tarda, las reglas están bien.
+
+### Antes y después
+
+El cuello de botella era `Tablero.es_legal()`: clonaba el tablero entero y
+recalculaba **todas** las casillas atacadas por el rival, una vez por cada jugada
+candidata. Eso convertía `movimientos_legales()` en algo del orden de
+O(piezas²) por posición, sin ningún cacheo.
+
+| Posición | perft(3) antes | perft(3) ahora | Mejora |
+|---|---|---|---|
+| Inicial | 3,6 s | 1,3 s | 2,8x |
+| Kiwipete | 69,3 s | 24,0 s | 2,9x |
+| Al paso | 0,8 s | 0,3 s | 2,7x |
+| Promoción | 5,2 s | 1,8 s | 2,9x |
+| Enroque mixto | 32,0 s | 13,3 s | 2,4x |
+| Jaque | 24,5 s | 9,8 s | 2,5x |
+| **Suma de los seis** | **135,4 s** | **50,5 s** | **2,7x** |
+
+### Qué se hizo, y qué no
+
+Dos cosas, en este orden:
+
+1. **Análisis de clavadas por posición** (`_preparar_legalidad`). En vez de
+   clonar por candidata, se calcula una vez: qué casillas ataca el rival, si
+   estamos en jaque y qué piezas propias están **clavadas** (son el único bloqueo
+   entre el rey y una pieza rival que resbala). Una pieza que no está clavada se
+   puede declarar legal sin clonar nada, porque al moverla no puede aparecer un
+   ataque nuevo contra el rey. Se sigue simulando con clon, correctamente, todo
+   lo que no se puede decidir así: el movimiento del rey, las jugadas con jaque,
+   el enroque y la captura al paso (que es la única capaz de descubrir un ataque
+   por una línea que no pasa por la pieza que se mueve).
+2. **`Posicion` más barata** (`slots`, un `__hash__` que no construye tuplas y un
+   catálogo de las 64 casillas reutilizado en `desplazar`). No cambia la
+   representación del tablero ni una sola regla: `Posicion` era la pieza de datos
+   más caliente y se creaba y se hasheaba millones de veces por perft.
+
+`python -m pytest` tarda 6,2 s con 658 pruebas (antes: 636 en 4,9 s).
+
+### Dónde está el límite ahora, y qué NO se ha hecho
+
+Después de estos cambios, el 48% del tiempo que queda está en un solo sitio:
+`Tablero.clonar()`. La simulación de una jugada clona el tablero entero, y eso
+significa crear unos 32 objetos `Pieza` nuevos y validarlos uno a uno, miles de
+veces. La cifra sale de `cProfile`, que infla un poco el coste de las llamadas a
+función, así que en tiempo real es algo menor: pero es el número más grande de la
+lista, y no es una sospecha.
+
+**No se ha cambiado la representación del tablero** (sigue siendo un diccionario
+`Posicion -> Pieza`) a propósito, y la razón está en el perfil: el diccionario y
+el *hashing* de casillas son hoy una fracción pequeña del coste, mientras que
+`clonar` es la mitad. Convertir el tablero en un array plano de 64 casillas
+eliminaría el *hashing*, que ya no es el problema, y **no** tocaría `clonar`, que
+sí lo es. Sería reescribir el módulo para no ganar casi nada.
+
+Lo que sí merece la pena, como paso aparte y con su propia medición, es
+atacar `clonar`, y hay dos caminos:
+
+- **Que `Pieza` sea inmutable** (hoy nadie la muta: se comprueba) y que `clonar`
+  comparta los mismos objetos en vez de copiarlos. Es el cambio más pequeño y el
+  que más rinde, porque elimina de raíz la creación de las 600 000 piezas por
+  perft(3). Toca una clase pública, así que no se ha hecho sin preguntar.
+- **Aplicar y desaplicar** (hacer la jugada y deshacerla en el mismo tablero, en
+  vez de clonar) es lo que hacen los motores de verdad, y elimina el coste por
+  completo. Es más delicado: hay que devolver el tablero **exactamente** como
+  estaba, derechos de enroque y última jugada incluidos, y un error ahí no se ve
+  en un perft corto.
+
+### Para qué sirve hoy
+
+- **Jugar entre dos personas**: de sobra. Generar las jugadas de una posición es
+  instantáneo, y la partida va sin tirones.
+- **Analizar una partida o un final**: de sobra. Recorrer unos cientos de miles
+  de posiciones entra holgadamente.
+- **Un rival con búsqueda (minimax, alfa-beta)**: todavía **no**. Un perft(3) de
+  Kiwipete son 24 s, y una búsqueda de 3-4 niveles visita millones de posiciones.
+  Con estas cifras haría falta además **tablas de transposición** (guardar el
+  resultado de las posiciones ya visitadas, que aquí no hay ninguna) y probablemente
+  el trabajo sobre `clonar` del punto anterior. Es un trabajo de otra vez, no un
+  ajuste.
+
+En otras palabras: el generador de jugadas ya no es el problema. Lo que falta
+para una IA es la búsqueda y su cacheo, no más velocidad de generación.
 
 ## Limitaciones
 

@@ -57,6 +57,58 @@ OPCIONES_ENROQUE = (
 FILA_INICIAL_PEONES = {Color.BLANCO: 1, Color.NEGRO: 6}
 
 
+def _desliza_en_rayo(tipo: TipoPieza, columnas: int, filas: int) -> bool:
+    """True si la pieza resbala en esa dirección (a lo largo de un rayo).
+
+    Solo se usa con las ocho direcciones del rey, así que hay dos casos y no
+    hace falta nada más: una dirección es **ortogonal** (una de las dos
+    componentes es cero) o **diagonal** (las dos son distintas de cero). Por
+    eso la comprobación es "si una de las dos es cero", en vez de mirar si la
+    casilla concreta está en una fila o en una columna.
+    """
+    if columnas == 0 or filas == 0:
+        return tipo in (TipoPieza.TORRE, TipoPieza.DAMA)
+    return tipo in (TipoPieza.ALFIL, TipoPieza.DAMA)
+
+
+class _Legalidad:
+    """Lo que se calcula una vez por posición y luego se reutiliza.
+
+    ``es_legal`` funciona clonando el tablero entero y mirando si el rey propio
+    queda amenazado, y eso hay que hacerlolo por cada jugada candidata: con 30
+    jugadas son 30 clones. Almost todo ese trabajo es el mismo para todas las
+    jugadas de la posición, y esto es la parte que se puede calcular una vez:
+
+    * ``atacadas``: las casillas que amenazan las piezas del rival. Es
+      exactamente lo que devuelve ``casillas_atacadas_por``, y da tanto para
+      saber si estamos en jaque como para comprobar el camino del rey en el
+      enroque.
+    * ``en_jaque``: si la casilla de nuestro rey está en ese conjunto.
+    * ``clavadas``: qué piezas propias son el **único** bloqueo entre nuestro
+      rey y una pieza rival que resbala (el "pin" de los manuales en inglés).
+
+    Con esto, la jugada de una pieza que no está clavada se puede declarar legal
+    sin clonar nada: si no está clavada es que no es el bloqueo de ningún rayo
+    de jaque, así que al moverla no puede aparecer un ataque nuevo contra
+    nuestro rey.
+    """
+
+    __slots__ = ("color", "rey", "atacadas", "en_jaque", "clavadas")
+
+    def __init__(
+        self,
+        color: Color,
+        rey: Posicion,
+        atacadas: set[Posicion],
+        clavadas: dict[Posicion, tuple[int, int]],
+    ) -> None:
+        self.color = color
+        self.rey = rey
+        self.atacadas = atacadas
+        self.en_jaque = rey in atacadas
+        self.clavadas = clavadas
+
+
 class Tablero:
     """Tablero de 8x8: piezas, generación de movimientos y detección de jaque."""
 
@@ -235,6 +287,89 @@ class Tablero:
         return self.es_ataqueada(rey.posicion, color.contrario)
 
     # ------------------------------------------------------------------
+    # Preparación de la legalidad (ataque por ataque, una vez por posición)
+    # ------------------------------------------------------------------
+
+    def _preparar_legalidad(self, color: Color) -> _Legalidad | None:
+        """Reúne en un objeto lo que hace falta para filtrar jugadas.
+
+        Se llama una vez por posición, antes de generar las jugadas del color,
+        y devuelve ``None`` si el color no tiene rey en el tablero (en ese caso
+        no hay nada que optimizar y todo se resuelve por la vía lenta, que es
+        la que sabe dar la respuesta cuando no hay rey).
+
+        El coste es de un ``casillas_atacadas_por`` (O(piezas)) más ocho
+        rayos desde el rey, frente a los ~30 clones que hacía falta antes.
+        """
+        rey = self.rey_de(color)
+        if rey is None:
+            return None
+        atacadas = self.casillas_atacadas_por(color.contrario)
+        return _Legalidad(color, rey.posicion, atacadas, self._piezas_clavadas(color, rey.posicion))
+
+    def _piezas_clavadas(self, color: Color, rey: Posicion) -> dict[Posicion, tuple[int, int]]:
+        """Piezas propias cuya salida dejaría al rey en jaque.
+
+        Una pieza está **clavada** cuando es el único bloqueo entre el rey y una
+        pieza rival que resbala por esa misma línea. Si la mueve, el rey se
+        queda a tiro.
+
+        Cómo se detecta, por cada una de las ocho direcciones del rey:
+
+        1. se busca la **primera** pieza del rayo,
+        2. si no es nuestra, no hay nada que hacer con esa dirección (si fuera
+           una rival que resbala, estaríamos en jaque y eso lo mira otro sitio),
+        3. si es nuestra, se busca la **segunda** pieza del rayo,
+        4. esa segunda pieza es la que importa: si es rival y resbala por esa
+           dirección, la primera estaba clavada. Si es nuestra, hay un tercer
+           bloqueo después y esta dirección no ata a nadie.
+
+        Ojo con por qué se necesitan **dos** casillas y no una: que haya una
+        pieza propia en el rayo no la convierte en clavija. Solo la ata si
+        detrás no hay ningún otro bloqueo y lo que viene es una rival que
+        resbala.
+
+        El valor del diccionario es la dirección del rayo (``(columnas, filas)``),
+        que es lo que hace falta después para preguntar si una jugada se sale
+        de la línea.
+        """
+        clavadas: dict[Posicion, tuple[int, int]] = {}
+        for columnas, filas in DESPLAZAMIENTOS_REY:
+            primera, segunda = self._dos_primeras_en_rayo(rey, columnas, filas)
+            if primera is None:
+                continue
+            if self._piezas[primera].color is not color:
+                continue
+            if segunda is None:
+                continue
+            rival = self._piezas[segunda]
+            if rival.color is color:
+                continue
+            if _desliza_en_rayo(rival.tipo, columnas, filas):
+                clavadas[primera] = (columnas, filas)
+        return clavadas
+
+    def _dos_primeras_en_rayo(
+        self, desde: Posicion, columnas: int, filas: int
+    ) -> tuple[Posicion | None, Posicion | None]:
+        """Las dos primeras piezas que hay en una dirección, y ``None`` si faltan.
+
+        Se usa para la clavada. No baja por un rayo entero como quien busca
+        destinos, sino que se para en la segunda pieza: para saber si la
+        primera está clavada no hace falta nada más allá de la segunda.
+        """
+        destino = desde.desplazar(columnas, filas)
+        primera = None
+        while destino is not None:
+            if destino in self._piezas:
+                if primera is None:
+                    primera = destino
+                else:
+                    return primera, destino
+            destino = destino.desplazar(columnas, filas)
+        return primera, None
+
+    # ------------------------------------------------------------------
     # Generación de movimientos
     # ------------------------------------------------------------------
 
@@ -254,25 +389,131 @@ class Tablero:
         pieza = self.obtener(posicion)
         if pieza is None:
             return []
+        contexto = self._preparar_legalidad(pieza.color)
         candidatos = [
             Movimiento(posicion, destino)
             for destino in self._destinos_de(pieza, incluir_enroque=True)
         ]
-        return [movimiento for movimiento in candidatos if self.es_legal(movimiento)]
+        return [
+            movimiento
+            for movimiento in candidatos
+            if self._es_legal_con_contexto(movimiento, contexto)
+        ]
 
     def movimientos_legales(self, color: Color) -> list[Movimiento]:
         """Todos los movimientos legales disponibles para un color.
 
         Se usa para validar lo que escribe el jugador y para detectar jaque
         mate y ahogado (si no hay ningún movimiento legal, la partida terminó).
+
+        El análisis de la posición (ataques del rival y piezas clavadas) se hace
+        **una vez** y se reutiliza para todas las jugadas, en vez de repetirlo
+        en cada candidata. Las jugadas que no se pueden resolver así (rey, jaque,
+        enroque y captura al paso) siguen yendo por la simulación con clon.
         """
         resultado = []
+        contexto = self._preparar_legalidad(color)
         for pieza in self.piezas(color):
             for destino in self._destinos_de(pieza, incluir_enroque=True):
                 movimiento = Movimiento(pieza.posicion, destino)
-                if self.es_legal(movimiento):
+                if self._es_legal_con_contexto(movimiento, contexto):
                     resultado.append(movimiento)
         return resultado
+
+    def _es_legal_con_contexto(self, movimiento: Movimiento, contexto: _Legalidad | None) -> bool:
+        """Si la jugada es legal, reutilizando lo que ya se calculó por posición.
+
+        Es el camino rápido de ``es_legal``, y la respuesta tiene que ser
+        **exactamente la misma**. La diferencia es de dónde sale: en vez de
+        clonar el tablero y recomputar todos los ataques, usa el análisis de la
+        posición que ya hizo ``_preparar_legalidad``.
+
+        Lo que se decide aquí sin clonar, y por qué es correcto:
+
+        * **Una pieza que no está clavada se puede mover.** Si no está clavada,
+          no es el único bloqueo entre nuestro rey y ninguna pieza rival que
+          resbala, así que al moverla no puede quedar descubierto un ataque
+          contra el rey. Tampoco puede aparecer un ataque nuevo capturing: si la
+          pieza captura a una rival, lo único que desaparece del tablero es una
+          atacante, nunca aparece una.
+
+        Y lo que **no** se decide aquí, porque se delega en ``es_legal`` (la
+        simulación con clon) para no perder exactitud:
+
+        * **El movimiento del rey**, con o sin enroque. Al quitar el rey de su
+          casilla pueden desaparecer attackers que lo cubrían, así que la
+          casilla de destino hay que mirarla sobre el tablero ya movido.
+        * **Cualquier jugada con el rey en jaque.** En jaque solo vale mover el
+          rey o tapar/capturar el atacante, y decidirlo sin simular es un
+          segundo problema distinto. Las posiciones con jaque son una
+          minoría, así que el coste no importa.
+        * **La captura al paso**, porque es la única jugada capaz de descubrir
+          el jaque sobre un rayo que **no** pasa por la pieza que se mueve: al
+          retirar el peón capturado disappears un bloque en una fila en la que
+          puede haber los dos reyes alineados. Se simula, que es lo correcto.
+        """
+        if contexto is None:
+            return self.es_legal(movimiento)
+        pieza = self.obtener(movimiento.origen)
+        if pieza is None or movimiento.origen == movimiento.destino:
+            return False
+        objetivo = self.obtener(movimiento.destino)
+        if objetivo is not None and objetivo.color is pieza.color:
+            return False
+        if objetivo is not None and objetivo.tipo is TipoPieza.REY:
+            return False
+        if pieza.tipo is TipoPieza.REY:
+            return self.es_legal(movimiento)
+        if contexto.en_jaque:
+            return self.es_legal(movimiento)
+        if self._es_captura_al_paso_de(movimiento):
+            return self.es_legal(movimiento)
+        if movimiento.origen in contexto.clavadas:
+            return self._sigue_en_el_rayo(contexto, movimiento)
+        return True
+
+    def _sigue_en_el_rayo(self, contexto: _Legalidad, movimiento: Movimiento) -> bool:
+        """True si el destino sigue en la línea por la que la pieza está clavada.
+
+        "Seguir en la línea" se comprueba con aritmética, no mirando si el
+        destino cae en la misma fila, columna o diagonal que el rey:
+
+        * **colinealidad**: el destino tiene que estar en la recta que pasa por
+          el rey con esa dirección, no en una cualquiera que vaya para el mismo
+          lado. Con el rey en e8 y la pieza clavada en d7 (rayo hacia el
+          NO-OESTE, hacia b5), la casilla d6 va "hacia abajo y hacia la
+          izquierda" pero **no** está en esa diagonal, así que salir ahí sí
+          descubre el jaque. Comparar solo los signos de las diferencias no
+          serviría: daría por buena la jugada.
+        * **sentido**: estar en la misma recta no basta, el destino tiene que
+          estar hacia el mismo lado del rey que el rayo, no al revés.
+
+        Las dos juntas son el producto vectorial (que vale 0 solo si son
+        colineales) y el producto escalar (que dice si van en el mismo sentido).
+        """
+        columnas, filas = contexto.clavadas[movimiento.origen]
+        delta_columnas = movimiento.destino.columna - contexto.rey.columna
+        delta_filas = movimiento.destino.fila - contexto.rey.fila
+        if delta_columnas * filas != delta_filas * columnas:
+            return False
+        return delta_columnas * columnas + delta_filas * filas > 0
+
+    def _es_captura_al_paso_de(self, movimiento: Movimiento) -> bool:
+        """True si esta jugada es una captura al paso.
+
+        Es la misma condición que usa ``_aplicar`` para decidir si tiene que
+        retirar el peón de al lado: el destino está vacío **y** la captura al
+        paso es legal con la casilla de siempre. Las dos piezas, la que se
+        mueve y la víctima, se escriben siempre en casillas contiguas, así que
+        para el peón que se mueve esto se puede comprobar sin llegar a aplicar
+        la jugada.
+        """
+        pieza = self.obtener(movimiento.origen)
+        if pieza is None or pieza.tipo is not TipoPieza.PEON:
+            return False
+        if self.en_juego(movimiento.destino):
+            return False
+        return self._es_captura_al_paso(pieza, movimiento.destino)
 
     def es_legal(self, movimiento: Movimiento) -> bool:
         """Indica si el movimiento existe y no deja al rey propio en jaque.

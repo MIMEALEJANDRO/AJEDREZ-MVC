@@ -53,9 +53,16 @@ LETRAS_PROMOCION = {
 }
 
 
-@dataclass
+@dataclass(slots=True)
 class Pieza:
-    """Pieza del tablero con su color, tipo y casilla actual."""
+    """Pieza del tablero con su color, tipo y casilla actual.
+
+    ``slots=True`` es la misma decisión que en ``Posicion`` y por el mismo
+    motivo: ``clonar`` construye una copia de cada pieza del tablero, así que
+    estas piezas se crean y se leen millones de veces en un perft. Sin el
+    diccionario de atributos que Python pone por defecto en cada objeto, crear
+    una pieza y leer sus campos es más rápido y ocupa menos.
+    """
 
     color: Color
     tipo: TipoPieza
