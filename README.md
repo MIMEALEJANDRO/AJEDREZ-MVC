@@ -148,21 +148,34 @@ decide quien lleva el proyecto.
 
 ## Cómo se juega
 
-Las jugadas se escriben con origen y destino pegados, y se aceptan en
-cualquiera de estas formas:
+En la ventana se juega con el ratón: se hace clic en la casilla de origen y en
+la de destino. El panel lateral dice siempre cuál fue la última jugada
+("Blancas e2-e4"), y el tablero se ilumina solo cuando le toca a quien está
+jugando y se atenúa cuando no.
 
+Lo demás —el FEN y el historial completo— está detrás del botón **Mostrar FEN**,
+que los despliega y los vuelve a recoger. Antes estaban siempre a la vista, que
+es mucha información para lo que se quiere de verdad al mover una pieza.
+
+Para elegir bando, el selector **Juegas con:** del panel. Con "Blancas" o
+"Negras" el tablero se gira para tener tus piezas abajo y **empieza ese bando**;
+con "Los dos colores" no hay bando y se juega la partida entera. Cambiar de bando
+con la partida ya empezada pregunta antes de reiniciarla.
+
+Y hay una ayuda en la propia partida (**opción 8** del menú de juego) que
+resume las notaciones. Ese menú es del bucle antiguo de la consola y **no lo
+ofrece la ventana**: la nota está en [Qué queda sin usar](#qué-queda-sin-usar-y-por-qué).
+
+El bucle de menús también acepta la jugada escrita a mano:
 ```
 e2e4      e2-e4      'e2 e4'      peón de e2 a e4
 ```
 
-Si un peón llega a la última fila hay que indicar a qué pieza promociona:
+Y si un peón llega a la última fila hay que indicar a qué pieza promociona:
 
 ```
 a7a8q   q = dama   r = torre   b = alfil   n = caballo
 ```
-
-Y hay una ayuda en la propia partida (**opción 8** del menú de juego) que
-resume todo esto.
 
 ## Reglas implementadas
 

@@ -225,29 +225,47 @@ class VentanaAjedrez:
         self.etiqueta_turno = ttk.Label(panel, text="", font=("Segoe UI", 10))
         self.etiqueta_turno.grid(row=3, column=0, sticky="w", pady=(2, 12))
 
-        # -- historial --
-        ttk.Label(panel, text="Jugadas", font=("Segoe UI", 9, "bold")).grid(
+        # -- última jugada --
+        # Lo único sobre la partida que se ve sin pedir nada. Antes esto no
+        # estaba: el panel enseñaba el historial entero y el FEN de golpe, que es
+        # mucha información para lo que se quiere de verdad al mover una pieza
+        # ("qué acabo de hacer"). El historial completo y el FEN siguen estando,
+        # pero detrás del botón de más abajo.
+        ttk.Label(panel, text="Última jugada:", font=("Segoe UI", 9, "bold")).grid(
             row=4, column=0, sticky="w"
         )
-        marco_historial = ttk.Frame(panel)
-        marco_historial.grid(row=5, column=0, sticky="nsew")
-        self.historial = tk.Text(
-            marco_historial, width=32, height=15, wrap="word", font=("Consolas", 10)
-        )
-        barra = ttk.Scrollbar(marco_historial, orient="vertical", command=self.historial.yview)
-        self.historial.configure(yscrollcommand=barra.set, state="disabled")
-        self.historial.grid(row=0, column=0, sticky="nsew")
-        barra.grid(row=0, column=1, sticky="ns")
+        self.etiqueta_ultima = ttk.Label(panel, text="Todavía no hay jugadas", font=("Segoe UI", 9))
+        self.etiqueta_ultima.grid(row=5, column=0, sticky="w", pady=(2, 10))
 
-        # -- FEN --
-        ttk.Label(panel, text="FEN", font=("Segoe UI", 9, "bold")).grid(
-            row=6, column=0, sticky="w", pady=(12, 0)
+        # -- botón que abre y cierra el detalle --
+        self.boton_fen = ttk.Button(panel, text="Mostrar FEN", command=self._alternar_panel_fen)
+        self.boton_fen.grid(row=6, column=0, sticky="ew", pady=(0, 12))
+
+        # -- el detalle: FEN e historial, oculto de entrada --
+        # Se construye entero pero **nace sin hacer grid**: por eso no se ve
+        # nada hasta que se pulsa el botón. ``_panel_fen_visible`` es la que
+        # manda, y se actualiza en los dos métodos de mostrar y ocultar, para no
+        # tener que preguntarle a tkinter si algo está en pantalla.
+        self._panel_fen_visible = False
+        self.panel_fen = ttk.Frame(panel)
+        ttk.Label(self.panel_fen, text="FEN", font=("Segoe UI", 9, "bold")).grid(
+            row=0, column=0, sticky="w"
         )
-        self.campo_fen = ttk.Entry(panel, font=("Consolas", 9))
-        self.campo_fen.grid(row=7, column=0, sticky="ew", pady=(2, 4))
-        ttk.Button(panel, text="Copiar FEN", command=self._copiar_fen).grid(
-            row=8, column=0, sticky="ew"
+        self.campo_fen = ttk.Entry(self.panel_fen, font=("Consolas", 9))
+        self.campo_fen.grid(row=1, column=0, sticky="ew", pady=(2, 4))
+        ttk.Button(self.panel_fen, text="Copiar FEN", command=self._copiar_fen).grid(
+            row=2, column=0, sticky="ew"
         )
+        ttk.Label(self.panel_fen, text="Jugadas", font=("Segoe UI", 9, "bold")).grid(
+            row=3, column=0, sticky="w", pady=(12, 0)
+        )
+        self.historial = tk.Text(
+            self.panel_fen, width=32, height=12, wrap="word", font=("Consolas", 10)
+        )
+        barra = ttk.Scrollbar(self.panel_fen, orient="vertical", command=self.historial.yview)
+        self.historial.configure(yscrollcommand=barra.set, state="disabled")
+        self.historial.grid(row=4, column=0, sticky="nsew", pady=(2, 0))
+        barra.grid(row=4, column=1, sticky="ns")
 
         # -- botones --
         self.botones: dict[str, ttk.Button] = {}
@@ -265,9 +283,9 @@ class VentanaAjedrez:
         for indice, (clave, texto, accion) in enumerate(acciones):
             fila, columna = divmod(indice, 2)
             boton = ttk.Button(panel, text=texto, command=accion)
-            boton.grid(row=9 + fila, column=columna, sticky="ew", padx=(0, 5), pady=2)
+            boton.grid(row=7 + fila, column=columna, sticky="ew", padx=(0, 5), pady=2)
             self.botones[clave] = boton
-        filas_botones = 9 + (len(acciones) + 1) // 2
+        filas_botones = 7 + (len(acciones) + 1) // 2
 
         # -- avisos --
         ttk.Label(panel, text="Avisos", font=("Segoe UI", 9, "bold")).grid(
@@ -610,6 +628,59 @@ class VentanaAjedrez:
     # Refresco de lo que no es el tablero
     # ------------------------------------------------------------------
 
+    def _alternar_panel_fen(self) -> None:
+        """Muestra u oculta el detalle de FEN e historial."""
+        if self._panel_fen_visible:
+            self._ocultar_panel_fen()
+        else:
+            self._mostrar_panel_fen()
+
+    def _mostrar_panel_fen(self) -> None:
+        """Enseña el panel de FEN e historial y pone el botón en "Ocultar FEN"."""
+        self.panel_fen.grid(row=6, column=0, sticky="nsew", pady=(0, 12))
+        self.boton_fen.configure(text="Ocultar FEN")
+        self._panel_fen_visible = True
+        # Se rellena al abrirlo, no solo al mover: así nunca se puede ver un
+        # FEN o un historial de la jugada anterior.
+        self._refrescar_panel_fen(self.controlador.partida)
+
+    def _ocultar_panel_fen(self) -> None:
+        """Esconde el panel y vuelve a poner el botón en "Mostrar FEN"."""
+        self.panel_fen.grid_remove()
+        self.boton_fen.configure(text="Mostrar FEN")
+        self._panel_fen_visible = False
+
+    def _refrescar_ultima_jugada(self, partida: Partida) -> None:
+        """Escribe en una línea qué fue lo último que se jugó.
+
+        Con el historial entero a la vista era difícil saber qué acabas de hacer;
+        esto lo dice sin más. Se deduce del último movimiento del historial y del
+        turno: como el turno ya es el del siguiente cuando se mira, quien movió
+        es su contrario.
+        """
+        if not partida.historial:
+            self.etiqueta_ultima.configure(text="Todavía no hay jugadas")
+            return
+        movimiento = partida.historial[-1]
+        color = partida.turno.contrario
+        self.etiqueta_ultima.configure(
+            text=f"{color.nombre_legible} {movimiento.notacion}"
+        )
+
+    def _refrescar_panel_fen(self, partida: Partida) -> None:
+        """Rellena el FEN y el historial. Solo tiene efecto si el panel está abierto.
+
+        Se comprueba la visibilidad para no escribir en unas 40 casillas de
+        historial que no se están viendo. Es una economía pequeña, pero lo que
+        importa es que el contenido se pone al día al abrirlo y en cada jugada
+        mientras esté abierto, y en ningún otro momento puede quedar viejo.
+        """
+        if not self._panel_fen_visible:
+            return
+        self.campo_fen.delete(0, "end")
+        self.campo_fen.insert(0, partida.a_fen())
+        self._llenar_historial(partida)
+
     def _refrescar(self) -> None:
         partida = self.controlador.partida
         self._pintar_tablero()
@@ -619,9 +690,8 @@ class VentanaAjedrez:
         )
         self.etiqueta_turno.configure(text=partida.resumen())
 
-        self.campo_fen.delete(0, "end")
-        self.campo_fen.insert(0, partida.a_fen())
-        self._llenar_historial(partida)
+        self._refrescar_ultima_jugada(partida)
+        self._refrescar_panel_fen(partida)
 
         # Con la partida terminada no tiene sentido deshacer ni guardar nada más.
         terminada = partida.esta_terminada()
@@ -723,6 +793,10 @@ class VentanaAjedrez:
         # empiezan las negras), y si la vista reinicia por su cuenta se queda
         # sin esa mitad y la partida vuelve a bloquearse.
         self.controlador.nueva_partida(self.color)
+        # El detalle se esconde: si estaba abierto enseñando las jugadas de la
+        # partida anterior, dejarlo abiertoaría mostrando un historial que ya no
+        # es el de esta partida.
+        self._ocultar_panel_fen()
         self.origen = None
         self.destinos = []
         self._anotar("Partida nueva.")
@@ -778,6 +852,10 @@ class VentanaAjedrez:
         if self.controlador.cargar(clave):
             self.origen = None
             self.destinos = []
+            # Por lo mismo que al empezar una partida: el detalle se esconde para
+            # no dejar a la vista el historial de la partida que se acaba de
+            # dejar. Se rellena al volver a abrirlo.
+            self._ocultar_panel_fen()
             self._refrescar()
 
     def _listar(self) -> None:

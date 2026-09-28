@@ -54,6 +54,22 @@ def ventana(root):
     return VentanaAjedrez(root)
 
 
+@pytest.fixture
+def ambos(ventana):
+    """La ventana en modo "Los dos colores", que es el único que deja jugar la
+    partida entera.
+
+    Hace falta porque con un bando elegido el controlador no deja mover el color
+    contrario, así que una jugada y su respuesta no se pueden hacer seguidas. Es
+    el límite del modo "un solo color" sin rival, que está anotado en el README;
+    aquí se elude poniendo el selector en "ambos", que es lo que hace quien
+    quiere practicar de verdad.
+    """
+    ventana.opciones_color.set("ambas")
+    ventana._al_cambiar_color()
+    return ventana
+
+
 # ---------------------------------------------------------------------------
 # Bando y giro del tablero
 # ---------------------------------------------------------------------------
@@ -142,3 +158,95 @@ class TestBandoYGiro:
         assert control.partida.turno is Color.NEGRO
         assert control.partida.historial == []
         assert control.clave_guardada is None
+
+
+# ---------------------------------------------------------------------------
+# El detalle de FEN e historial: oculto de salida
+# ---------------------------------------------------------------------------
+
+class TestPanelDeFen:
+    """El boton "Mostrar FEN" y lo que hay detras.
+
+    Lo que se comprueba aqui es la razon de existir del boton: sin pulsar nada no
+    se ve el FEN ni el historial, y lo unico que se ve sobre la partida es la
+    ultima jugada. Antes esas dos cosas estaban siempre a la vista, que es mucha
+    informacion para alguien que solo quiere mover una pieza.
+    """
+
+    def test_el_panel_nace_oculto(self, ventana):
+        assert ventana._panel_fen_visible is False
+        assert ventana.boton_fen.cget("text") == "Mostrar FEN"
+        # grid_info() dice si un widget esta colocado en la rejilla: vacio
+        # significa que no lo esta, que es como se comprueba "oculto" en tkinter.
+        assert ventana.panel_fen.grid_info() == {}
+
+    def test_el_boton_muestra_el_panel(self, ventana):
+        ventana.boton_fen.invoke()
+        assert ventana._panel_fen_visible is True
+        assert ventana.boton_fen.cget("text") == "Ocultar FEN"
+        assert ventana.panel_fen.grid_info() != {}
+
+    def test_el_boton_lo_vuelve_a_ocultar(self, ventana):
+        ventana.boton_fen.invoke()
+        ventana.boton_fen.invoke()
+        assert ventana._panel_fen_visible is False
+        assert ventana.boton_fen.cget("text") == "Mostrar FEN"
+        assert ventana.panel_fen.grid_info() == {}
+
+    def test_al_abrirlo_muestra_el_fen_de_esa_partida(self, ventana):
+        ventana.controlador.aplicar_jugada("e2e4")
+        ventana.boton_fen.invoke()
+        assert ventana.campo_fen.get() == ventana.controlador.partida.a_fen()
+
+    def test_se_actualiza_en_cada_jugada_mientras_esta_abierto(self, ventana):
+        ventana.boton_fen.invoke()
+        antes = ventana.campo_fen.get()
+        ventana.controlador.aplicar_jugada("e2e4")
+        ventana._refrescar()
+        assert ventana.campo_fen.get() != antes
+        assert ventana.campo_fen.get() == ventana.controlador.partida.a_fen()
+
+    def test_empieza_oculto_tras_partida_nueva(self, ventana):
+        ventana.boton_fen.invoke()
+        assert ventana._panel_fen_visible is True
+        ventana._nueva_partida()
+        assert ventana._panel_fen_visible is False
+        assert ventana.boton_fen.cget("text") == "Mostrar FEN"
+
+
+class TestUltimaJugada:
+    def test_al_empezar_dice_que_no_hay_jugadas(self, ventana):
+        assert ventana.etiqueta_ultima.cget("text") == "Todavía no hay jugadas"
+
+    def test_despues_de_mover_dice_el_color_y_la_casilla(self, ventana):
+        ventana.controlador.aplicar_jugada("e2e4")
+        ventana._refrescar()
+        assert ventana.etiqueta_ultima.cget("text") == "Blancas e2-e4"
+
+    def test_se_actualiza_en_cada_jugada(self, ambos):
+        ambos.controlador.aplicar_jugada("e2e4")
+        ambos._refrescar()
+        ambos.controlador.aplicar_jugada("e7e5")
+        ambos._refrescar()
+        assert ambos.etiqueta_ultima.cget("text") == "Negras e7-e5"
+
+    def test_tras_deshacer_vuelve_a_la_anterior(self, ambos):
+        ambos.controlador.aplicar_jugada("e2e4")
+        ambos.controlador.aplicar_jugada("e7e5")
+        ambos._refrescar()
+        ambos._deshacer()
+        assert ambos.etiqueta_ultima.cget("text") == "Blancas e2-e4"
+
+    def test_tras_deshacer_todas_vuelve_a_no_haber_jugadas(self, ventana):
+        ventana.controlador.aplicar_jugada("e2e4")
+        ventana._refrescar()
+        ventana._deshacer()
+        assert ventana.etiqueta_ultima.cget("text") == "Todavía no hay jugadas"
+        assert ventana.controlador.partida.historial == []
+
+    def test_con_negras_dice_negras(self, ventana):
+        ventana.opciones_color.set("negras")
+        ventana._al_cambiar_color()
+        ventana.controlador.aplicar_jugada("e7e5")
+        ventana._refrescar()
+        assert ventana.etiqueta_ultima.cget("text") == "Negras e7-e5"

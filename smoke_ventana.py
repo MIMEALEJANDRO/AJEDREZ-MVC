@@ -155,6 +155,23 @@ def elegir(ventana: VentanaAjedrez, valor: str) -> None:
     ventana._al_cambiar_color()
 
 
+def silenciar_dialogos() -> None:
+    """Contesta sola a los diálogos, para que la prueba no se quede esperando.
+
+    Hace falta desde que cambiar de bando con la partida empezada pregunta si se
+    reinicia: en una prueba de humo no hay nadie que conteste, y un
+    ``askyesno`` sin responder deja el script colgado. Se sustituyen solo las dos
+    funciones que se usan (``askyesno`` y ``askstring``), no la clase entera.
+
+    Se contestan con "sí" y con un nombre fijo, que es lo que hace falta para que
+    las comprobaciones sean estables.
+    """
+    import views.ventana as modulo
+
+    modulo.messagebox.askyesno = lambda *argumentos, **opciones: True
+    modulo.messagebox.askstring = lambda *argumentos, **opciones: "partida de prueba"
+
+
 # ---------------------------------------------------------------------------
 # Las comprobaciones
 # ---------------------------------------------------------------------------
@@ -211,41 +228,66 @@ def parte_posicion_inicial(ventana: VentanaAjedrez) -> None:
 
 def parte_los_dos_colores(ventana: VentanaAjedrez) -> None:
     print("\n2) Los dos colores")
-    # Se sigue donde lo dejó la parte 1: jugada la apertura, y es el turno de
-    # las negras. Cambiar a "ambas" no toca la partida ni el tablero, así que
-    # sigue en su sitio (blancas abajo) y ahora es el turno del otro bando.
+    # Esta parte **empieza su propia partida**. Antes continuaba la de la parte 1,
+    # y ya no puede: cambiar de bando con la partida empezada reinicia (para que
+    # el bando y el turno no se queden descuadrados), así que al pasar a "ambas"
+    # la partida se queda en blanco.
+    #
+    # "Los dos colores" es además el único modo en el que se juega una partida
+    # entera: con un bando elegido el controlador no deja mover el color
+    # contrario, así que tras tu jugada el turno se te escapa.
     elegir(ventana, "ambas")
+    ventana._nueva_partida()
     comprobar(ventana.color is None, "el color jugador queda en ninguno")
     comprobar(
         ventana.controlador.color_jugador is None, "el controlador también juega con los dos"
     )
+    comprobar(
+        ventana.controlador.partida.turno is Color.BLANCO,
+        "sin bando no hay a quién dar la primera jugada: empiezan las blancas",
+    )
     comprobar(atenuado(ventana) == 0, f"el tablero NO se atenúa nunca ({atenuado(ventana)})")
 
     # Con los dos colores se puede mover el bando que tenga el turno...
-    clic_en_casilla_de_pantalla(ventana, 4, 1)  # e7, la segunda fila desde arriba
+    clic_en_casilla_de_pantalla(ventana, 4, 6)  # e2
+    comprobar(ventana.origen == Posicion(4, 1), f"se elige el peón de e2 ({ventana.origen})")
+    clic_en_casilla_de_pantalla(ventana, 4, 4)  # e4
     comprobar(
-        ventana.origen == Posicion(4, 6), f"se puede elegir una pieza negra ({ventana.origen})"
+        [m.notacion for m in ventana.controlador.partida.historial] == ["e2-e4"],
+        "y se juega e2-e4",
+    )
+    clic_en_casilla_de_pantalla(ventana, 4, 1)  # e7
+    comprobar(
+        ventana.origen == Posicion(4, 6), f"se elige el peón de e7 ({ventana.origen})"
     )
     clic_en_casilla_de_pantalla(ventana, 4, 3)  # e5
     comprobar(
         [m.notacion for m in ventana.controlador.partida.historial] == ["e2-e4", "e7-e5"],
-        "y moverla: e7-e5",
+        "y se juega e7-e5",
     )
     comprobar(atenuado(ventana) == 0, "y el tablero sigue sin atenuarse")
 
     # ...y el contrario, sin cambiar nada.
     clic_en_casilla_de_pantalla(ventana, 1, 6)  # b2
-    comprobar(ventana.origen == Posicion(1, 1), "y ahora se puede elegir una pieza blanca (b2)")
+    comprobar(ventana.origen == Posicion(1, 1), "y ahora se elige un peón blanco (b2)")
     clic_en_casilla_de_pantalla(ventana, 1, 4)  # b4
     comprobar(
         [m.notacion for m in ventana.controlador.partida.historial]
         == ["e2-e4", "e7-e5", "b2-b4"],
-        "y moverla: b2-b4",
+        "y se juega b2-b4",
+    )
+    # Y a la vez se ve cuál fue la última jugada, que es lo único que el panel
+    # enseña sin que se pulse nada.
+    comprobar(
+        ventana.etiqueta_ultima.cget("text") == "Blancas b2-b4",
+        f"y el panel dice cuál fue la última jugada ({ventana.etiqueta_ultima.cget('text')!r})",
     )
 
 
 def parte_elegir_color(ventana: VentanaAjedrez) -> None:
-    print("\n3) Elegir color coloca el tablero")
+    print("\n3) Elegir color coloca el tablero y pone el turno de acuerdo")
+    # Se empieza una partida nueva antes de elegir bando: así no hay jugadas que
+    # perder y no salta el diálogo de confirmación.
     ventana._nueva_partida()
     elegir(ventana, "negras")
     comprobar(ventana.girada is True, "al elegir negras el tablero se gira")
@@ -261,26 +303,93 @@ def parte_elegir_color(ventana: VentanaAjedrez) -> None:
         ventana, MARGEN + LADO_CASILLA / 2, MARGEN + 7 * LADO_CASILLA + LADO_CASILLA / 2
     )
     comprobar(simbolo == "♜", f"abajo a la izquierda se ve la torre negra (se ve {simbolo!r})")
-    comprobar(atenuado(ventana) == 64, "y el tablero se atenúa: es el turno de las blancas")
 
-    # Con negras seleccionadas, un clic en un peón negro no se puede hacer (no es
-    # el turno), pero en cuanto le toca sí. En el tablero girado las columnas
-    # también van del revés: la "e" es la cuarta desde la derecha, y la fila 7
-    # es la segunda desde abajo.
-    clic_en_casilla_de_pantalla(ventana, 3, 6)  # e7
-    comprobar(ventana.origen is None, "no se puede mover negro cuando es el turno de blanco")
-    ventana.controlador.partida.mover("e2", "e4")
-    ventana._refrescar()
-    comprobar(atenuado(ventana) == 0, "el tablero se ilumina cuando le toca a negras")
+    # Lo que cambió con el arreglo: con negras **empiezan las negras**. Antes se
+    # giraba la vista pero el turno se quedaba en las blancas y la partida
+    # quedaba bloqueada (ninguna jugada era legal).
+    comprobar(
+        ventana.controlador.color_jugador is Color.NEGRO, "el bando del jugador es negro"
+    )
+    comprobar(
+        ventana.controlador.partida.turno is Color.NEGRO,
+        "y con negras empieza el turno de las negras",
+    )
+    comprobar(atenuado(ventana) == 0, f"el tablero se ilumina: es el turno de negras ({atenuado(ventana)})")
+
+    # Se puede mover negro de entrada, sin tener que esperar a que mueva nadie.
+    # En el tablero girado las columnas van del revés: la "e" es la cuarta desde
+    # la derecha (columna 3) y la fila 7 es la segunda desde abajo (fila 6).
     clic_en_casilla_de_pantalla(ventana, 3, 6)  # e7
     comprobar(
         ventana.origen == Posicion(4, 6),
-        f"el peón de e7 se ve abajo del todo y se puede pulsar (seleccionó {ventana.origen})",
+        f"el peón de e7 se puede pulsar de entrada (seleccionó {ventana.origen})",
     )
     clic_en_casilla_de_pantalla(ventana, 3, 4)  # e5
     comprobar(
-        [m.notacion for m in ventana.controlador.partida.historial] == ["e2-e4", "e7-e5"],
+        [m.notacion for m in ventana.controlador.partida.historial] == ["e7-e5"],
         "y se juega e7-e5 con el mismo clic",
+    )
+    comprobar(
+        ventana.etiqueta_ultima.cget("text") == "Negras e7-e5",
+        f"el panel dice 'Negras e7-e5' ({ventana.etiqueta_ultima.cget('text')!r})",
+    )
+
+    # Y ahora sí es el turno de las blancas: el tablero se atenúa y el peón de e7
+    # ya no se puede tocar, porque no es el turno del bando elegido.
+    comprobar(
+        atenuado(ventana) == 64,
+        f"tras la jugada de negras se atenúa: es el turno de las blancas ({atenuado(ventana)})",
+    )
+    clic_en_casilla_de_pantalla(ventana, 3, 6)  # e7
+    comprobar(ventana.origen is None, "no se puede mover negro cuando es el turno de blanco")
+
+
+def parte_panel_fen(ventana: VentanaAjedrez) -> None:
+    print("\n5) El detalle de FEN e historial")
+    # Se vuelve a blancas para tener una partida normal y sin jugadas.
+    ventana._nueva_partida()
+    elegir(ventana, "blancas")
+    ventana._nueva_partida()
+
+    # De salida no se ve ni el FEN ni el historial, y el botón ofrece enseñarlos.
+    comprobar(not ventana._panel_fen_visible, "el panel de FEN nace oculto")
+    comprobar(
+        ventana.boton_fen.cget("text") == "Mostrar FEN",
+        f"el botón pone 'Mostrar FEN' ({ventana.boton_fen.cget('text')!r})",
+    )
+    comprobar(ventana.panel_fen.grid_info() == {}, "y no está colocado en pantalla")
+
+    # Al pulsarlo aparece, con su botón de copiar, y el botón cambia de texto.
+    ventana.boton_fen.invoke()
+    comprobar(ventana._panel_fen_visible, "al pulsarlo el panel se muestra")
+    comprobar(
+        ventana.boton_fen.cget("text") == "Ocultar FEN",
+        f"y el botón pasa a 'Ocultar FEN' ({ventana.boton_fen.cget('text')!r})",
+    )
+    comprobar(ventana.campo_fen.get() == ventana.controlador.partida.a_fen(), "el FEN es el de ahora")
+
+    # Se actualiza en cada jugada mientras esté abierto.
+    clic_en_casilla_de_pantalla(ventana, 4, 6)  # e2
+    clic_en_casilla_de_pantalla(ventana, 4, 4)  # e4
+    comprobar(
+        ventana.campo_fen.get() == ventana.controlador.partida.a_fen(),
+        "el FEN se actualiza al jugar, con el panel abierto",
+    )
+    comprobar(
+        "e2-e4" in ventana.historial.get("1.0", "end"),
+        "y el historial también",
+    )
+
+    # Y al pulsarlo otra vez se esconde.
+    ventana.boton_fen.invoke()
+    comprobar(not ventana._panel_fen_visible, "al pulsarlo otra vez se oculta")
+    comprobar(ventana.boton_fen.cget("text") == "Mostrar FEN", "y el botón vuelve a su texto")
+
+    # Empieza oculta en cada partida nueva.
+    ventana.boton_fen.invoke()
+    ventana._nueva_partida()
+    comprobar(
+        not ventana._panel_fen_visible, "una partida nueva lo deja oculto otra vez"
     )
 
 
@@ -344,10 +453,12 @@ def main() -> int:
         # ventana, y la comprobación fallaría sin que nada esté roto.
         for _ in range(3):
             root.update()
+        silenciar_dialogos()
         parte_posicion_inicial(ventana)
         parte_los_dos_colores(ventana)
         parte_elegir_color(ventana)
         parte_girar(ventana)
+        parte_panel_fen(ventana)
     finally:
         root.destroy()
 

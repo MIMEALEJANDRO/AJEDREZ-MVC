@@ -12,9 +12,13 @@ llamar sobre un objeto mínimo que solo tenga ``girada``:
 
     VentanaAjedrez._a_pantalla(ventana_falsa, Posicion(0, 0))
 
-Lo que no se puede comprobar sin abrir una ventana es que lo pintado sea
-exactamente lo que dicen estos números: eso es ``smoke_ventana.py``, que además
-pulsa el tablero de verdad con el ratón simulado.
+Lo que no se puede comprobar sin abrir una ventana se reparte así:
+
+* ``tests/test_ventana.py`` — el bando, el giro, el botón de FEN y la última
+  jugada. Abre una ventana de verdad, así que en un equipo sin pantalla
+  necesita ``xvfb-run -a``.
+* ``smoke_ventana.py`` — que lo pintado sea exactamente lo que dicen estos
+  números, pulsando el tablero con el ratón simulado. Se ejecuta a mano.
 """
 
 from __future__ import annotations
