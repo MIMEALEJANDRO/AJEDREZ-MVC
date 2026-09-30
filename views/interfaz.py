@@ -1,90 +1,116 @@
-"""El contrato de la vista: qué necesita saber el controlador para poder hablar.
+"""El contrato de la vista: qué necesita **de verdad** el controlador.
 
 Este archivo es la respuesta a una pregunta que aparece en cuanto se escribe el
 primer programa: *¿qué necesita exactamente la aplicación para poder mostrar y
 pedir cosas?*. La respuesta es una lista de métodos, y esa lista se declara aquí
 como un :class:`~typing.Protocol`.
 
-Un ``Protocol`` (disponible desde Python 3.8) describe una interfaz sin obligar
-a heredar de nada. Se escribe ``class Vista(Protocol)`` y una clase que tenga
-esos métodos **es** una vista, sin que tenga que declararlo. Esa es toda la
-ventaja frente a una clase base abstracta: añadir un método a la interfaz no
-rompe a las clases que ya existían, y una vista puede además tener los métodos
-extra que necesite.
+Un ``Protocol`` describe una interfaz sin obligar a heredar de nada. Se escribe
+``class Vista(Protocol)`` y una clase que tenga esos métodos **es** una vista, sin
+que tenga que declararlo. Esa es toda la ventaja frente a una clase base
+abstracta: añadir un método a la interfaz no rompe a las clases que ya existían.
 
 Por qué está en ``views/`` y no en ``controllers/``: el contrato describe lo que
 la vista **ofrece**, no lo que el controlador **quiere**. Que lo declare la capa
-que lo implementa deja la dependencia en un solo sentido (el controlador conoce
-la interfaz; la vista no conoce al controlador).
+que lo implementa deja la dependencia en un solo sentido.
 
-Y por qué existe, en concreto: el controlador importaba la vista de consola solo
-para poder escribir el tipo de ``vista`` en el constructor. Eso obligaba a que la
-consola estuviera instalada para poder probar el controlador, y convertía
-"cambiar de vista" en un cambio que tocaba el controlador. Con este archivo, el
-controlador depende de la interfaz y ya no de ninguna pantalla concreta.
+Por qué tiene **seis** métodos y no diecisiete
+--------------------------------------------
 
-Estado actual: desde que se borraron la consola y la ventana de menús, ninguna
-pantalla implementa este ``Protocol`` (la ventana jugable no usa menús, y está
-explicado en su módulo). Se conserva porque el bucle de menús del controlador
-sigue escrito y probado contra él, y porque las tablas ``OPCIONES_*`` de abajo
-son los datos de esos menús. Es una poda pendiente, anotada en el README.
+Antes este ``Protocol`` declaraba los diecisiete métodos que tenía la vista de
+consola, con sus tres menús y sus cuatro prompts. Cuando se borraron la consola
+y la ventana de menús, ese contrato se quedó **mintiendo**: la única vista que
+existe (``views.ventana.SalidaDeConsola``) implementa seis de los diecisiete, y
+``isinstance(vista, InterfazVista)`` devolvía ``False``.
+
+Un contrato que su propia implementación incumple no es documentación, es una
+mentira con nombre de ``Protocol``. Así que el contrato se **redujo a la
+verdad**: estos seis métodos son los que el controlador llama hoy por el camino
+que la ventana usa de verdad, y ``SalidaDeConsola`` los implementa todos. Eso sí
+se comprueba, y hay una prueba que lo comprueba (en ``tests/test_ventana.py``).
+
+Lo que se fue con el recorte, y por qué
+----------------------------------------
+
+* **Las tablas ``OPCIONES_*``**, que describían las etiquetas de unos menús que ya
+  no se pintan. No las leía nada del programa: solo seaban sus propias pruebas.
+* **El bucle de menús del controlador** (``ejecutar`` / ``jugar`` /
+  ``gestionar_archivos``) sigue escrito y sigue probado, pero **queda fuera de
+  este contrato** a propósito: usa once métodos más que aquí no se declaran, y no
+  los llama nadie. Es deuda técnica aceptada, con su coste y su criterio de
+  salida anotados en el README. Cuando se podar, este contrato no se toca: los
+  seis métodos de aquí son los que hacen falta para el camino vivo.
 
 Uso::
 
-    from views.interfaz import InterfazVista, OPCIONES_INICIO
-
-    def imprimir_todo(vista: InterfazVista, ...): ...
+    from views.interfaz import InterfazVista, texto_del_error
 """
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from models.errores import ErrorAjedrez
 from models.enums import Color
-from models.partida import Partida
 
 
 # --------------------------------------------------------------------------
-# Las opciones de cada menú
+# El contrato
 # --------------------------------------------------------------------------
-# Son *datos*, y por eso no viven dentro de la vista: son lo que el programa
-# ofrece, no lo que la pantalla pinta. En una ventana con botones serían las
-# etiquetas de los botones, y tenerlas en un solo sitio evita que una pantalla
-# se quede con la mitad y la otra con la otra mitad.
-#
-# La clave es lo que la persona escribe y el valor es lo que se lee. El "0" de
-# "volver" no es un accidente: es la convención de que la última opción de
-# cualquier menú es siempre salir, y el bucle de menús del controlador la usa
-# como salida por defecto cuando se acaba la entrada.
+# La regla que siguen los seis métodos: la vista **muestra** y **pregunta**, y
+# nada más. No decide nada (eso es del controlador), no toca el disco (eso es del
+# almacenamiento) y no sabe qué es una regla de ajedrez.
 
-OPCIONES_INICIO = {
-    "1": "Partida nueva",
-    "2": "Continuar una partida guardada",
-    "3": "Gestionar las partidas guardadas",
-    "4": "Ayuda",
-    "0": "Salir del programa",
-}
 
-OPCIONES_PARTIDA = {
-    "1": "Introducir una jugada",
-    "2": "Ver el historial",
-    "3": "Ver el FEN (para copiarlo a otro programa)",
-    "4": "Deshacer la última jugada",
-    "5": "Guardar la partida",
-    "6": "Guardar y empezar otra",
-    "7": "Abandonar la partida",
-    "8": "Ayuda",
-    "0": "Volver al menú principal (la partida se queda como estaba)",
-}
+@runtime_checkable
+class InterfazVista(Protocol):
+    """Lo que el controlador necesita de la pantalla que hay.
 
-OPCIONES_ARCHIVO = {
-    "1": "Guardar la partida actual",
-    "2": "Cargar una partida guardada",
-    "3": "Ver las partidas guardadas",
-    "4": "Borrar una partida guardada",
-    "0": "Volver al juego",
-}
+    Son seis, y no son negotiables por un motivo concreto: la pantalla de
+    ``views/ventana.py`` no tiene menús, así que la relación está **invertida**
+    (la pantalla tira de las acciones del controlador) y lo único que el
+    controlador le pide a la vista es poder hablar con la persona.
 
+    **Escribir** (no preguntan nada)
+        ``escribir``, ``titulo``, ``mostrar_mensaje``, ``mostrar_error``.
+
+    **Preguntar** (sí esperan)
+        ``pedir_confirmacion`` (sí o no) y ``elegir_color``.
+
+    ``elegir_color`` no pregunta nada en la práctica: la ventana tiene el selector
+    de bando siempre visible, así que devuelve lo que ya está marcado en pantalla
+    en vez de abrir un diálogo para preguntar lo que se está viendo. Por eso
+    está aquí y no como ``pedir_*``.
+    """
+
+    def escribir(self, texto: str = "") -> None:
+        """Escribe una línea de texto."""
+
+    def titulo(self, texto: str) -> None:
+        """Escribe un título destacado."""
+
+    def mostrar_mensaje(self, mensaje: str) -> None:
+        """Pinta un mensaje normal."""
+
+    def mostrar_error(self, error: Exception | str) -> None:
+        """Pinta un error. Recibe la excepción o su texto ya redactado.
+
+        Acepta las dos cosas a propósito: el controlador captura excepciones del
+        dominio (que ya traen el mensaje bueno) y a veces escribe un error
+        propio sin excepción detrás (un disco que no se puede escribir). Que la
+        vista no tenga que distinguir los dos casos simplifica las dos.
+        """
+
+    def pedir_confirmacion(self, pregunta: str) -> bool:
+        """Sí o no. ``False`` también si no hay quien responda."""
+
+    def elegir_color(self) -> Color:
+        """Con qué bando se juega. En la ventana, el que esté elegido ya."""
+
+
+# --------------------------------------------------------------------------
+# Cómo se leen los errores
+# --------------------------------------------------------------------------
 
 def texto_del_error(error: Exception | str) -> str:
     """Convierte lo que llega a ``mostrar_error`` en un texto presentable.
@@ -100,112 +126,13 @@ def texto_del_error(error: Exception | str) -> str:
     * Cualquier otra excepción es inesperada y se muestra su tipo, que es la
       información útil para saber qué está fallando.
 
-    Vive aquí, y no dentro de cada vista, porque es una decisión sobre *qué* se
-    le dice a la persona, no sobre cómo se lo enseña. La consola lo imprime y
-    una ventana lo pone en una etiqueta: si cada una decidiera por su cuenta,
-    un día una diría "Error inesperado" donde la otra no, y esa diferencia sería
-    un bug difícil de ver.
+    Vive aquí, y no dentro de la vista, porque es una decisión sobre *qué* se le
+    dice a la persona, no sobre cómo se lo enseña. Si mañana hubiera otra
+    pantalla, el texto sería el mismo: es el dominio quien lo redacta.
     """
-    from models.errores import ErrorAjedrez
-
     if isinstance(error, ErrorAjedrez):
         return f"No se pudo completar la acción: {error}"
     if isinstance(error, str):
         return error
     return f"Error inesperado ({type(error).__name__}): {error}"
 
-
-# --------------------------------------------------------------------------
-# El contrato
-# --------------------------------------------------------------------------
-# La regla que siguen todos los métodos: la vista **muestra** y **pregunta**, y
-# nada más. No decide nada (eso es del controlador), no toca el disco (eso es
-# del almacenamiento) y no sabe qué es una regla de ajedrez (recibe una
-# ``Partida`` ya montada y la pinta).
-
-
-@runtime_checkable
-class InterfazVista(Protocol):
-    """Lo que el controlador necesita de cualquier pantalla.
-
-    Los métodos se pueden clasificar en tres familias:
-
-    **Escribir** (devuelven ``None``, no preguntan nada)
-        ``escribir``, ``titulo``, ``mostrar_tablero``, ``mostrar_partidas``,
-        ``mostrar_historial``, ``mostrar_fen``, ``mostrar_ayuda``,
-        ``mostrar_mensaje``, ``mostrar_error``.
-
-    **Preguntar en un menú cerrado** (devuelven la clave elegida)
-        ``menu_inicio``, ``menu_partida``, ``menu_archivo``, ``elegir_color``,
-        ``pedir_confirmacion``.
-
-    **Pedir un texto libre** (devuelven lo escrito)
-        ``pedir_jugada``, ``pedir_texto_opcional``, ``pedir_texto``.
-
-    La diferencia entre ``pedir_texto`` y ``pedir_texto_opcional`` es la que
-    importa para un menú: el primero devuelve el valor por defecto si pulsan
-    Enter y nunca devuelve ``None``; el segundo devuelve ``None`` si la persona
-    responde "-" o no escribe nada, y ese ``None`` es lo que permite cancelar
-    una operación. Sin esa distinción, "no quiero guardar" y "me llamo -"
-    serían la misma cosa.
-    """
-
-    # -- escribir ------------------------------------------------------
-    def escribir(self, texto: str = "") -> None:
-        """Escribe una línea."""
-
-    def titulo(self, texto: str) -> None:
-        """Escribe un título destacado."""
-
-    def mostrar_tablero(self, partida: Partida) -> None:
-        """Pinta el tablero, el turno y el estado de la partida."""
-
-    def mostrar_partidas(self, informes: list[dict]) -> None:
-        """Pinta la lista de partidas guardadas, con su clave."""
-
-    def mostrar_historial(self, partida: Partida) -> None:
-        """Pinta las jugadas en notación legible."""
-
-    def mostrar_fen(self, partida: Partida) -> None:
-        """Pinta el FEN, para poder copiarlo a otro programa."""
-
-    def mostrar_ayuda(self) -> None:
-        """Pinta el resumen de cómo se juega."""
-
-    def mostrar_mensaje(self, mensaje: str) -> None:
-        """Pinta un mensaje normal."""
-
-    def mostrar_error(self, error: Exception | str) -> None:
-        """Pinta un error. Recibe la excepción o su texto ya redactado.
-
-        Acepta las dos cosas a propósito: el controlador captura excepciones del
-        dominio (que ya traen el mensaje bueno) y a veces escribe un error
-        propio sin excepción detrás (un disco que no se puede escribir). Que la
-        vista no tenga que distinguir los dos casos simplifica las dos.
-        """
-
-    # -- preguntar en un menú -------------------------------------------
-    def menu_inicio(self) -> str:
-        """Menú principal, antes de empezar a jugar. Devuelve la clave."""
-
-    def menu_partida(self) -> str:
-        """Menú de la partida en curso. Devuelve la clave."""
-
-    def menu_archivo(self) -> str:
-        """Menú de gestión de partidas guardadas. Devuelve la clave."""
-
-    def elegir_color(self) -> Color:
-        """Pregunta con qué color se juega."""
-
-    def pedir_confirmacion(self, pregunta: str) -> bool:
-        """Sí o no. ``False`` también si no hay quien responda."""
-
-    # -- pedir un texto libre -------------------------------------------
-    def pedir_jugada(self) -> str:
-        """Pide una jugada escrita. Vacía si no se escribe nada."""
-
-    def pedir_texto_opcional(self, pregunta: str) -> str | None:
-        """Pide un texto donde ``None`` significa "he cancelado"."""
-
-    def pedir_texto(self, pregunta: str, por_defecto: str = "") -> str:
-        """Pide un texto y devuelve el valor por defecto si no se escribe nada."""

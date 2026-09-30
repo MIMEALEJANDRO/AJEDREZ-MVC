@@ -1,4 +1,4 @@
-"""Pruebas del controlador: la coordinación de las tres capas.
+﻿"""Pruebas del controlador: la coordinación de las tres capas.
 
 Aquí se comprueba lo que no se puede probar en el modelo: que el controlador
 traduce correctamente lo que escribe la persona, que avisa cuando no es su
@@ -21,8 +21,47 @@ from models.enums import Color, EstadoPartida, TipoPieza
 from models.errores import MovimientoIlegal
 from models.partida import Partida
 from storage.base_storage import BaseStorage
-from views.interfaz import OPCIONES_ARCHIVO, OPCIONES_INICIO, OPCIONES_PARTIDA
 
+
+# ----------------------------------------------------------------------
+# Los menús del bucle antiguo, en el doble de prueba
+# ----------------------------------------------------------------------
+# Estas tablas vivían en ``views/interfaz.py`` y se han movido aquí, y el motivo
+# es que ya no describen nada del programa: ningún sitio las leía, solo sus
+# propias pruebas. Son los menús que el bucle de menús del controlador consume,
+# y ese bucle es deuda técnica aceptada (ver el README), así que sus datos van
+# con él.
+#
+# Un doble de prueba **debe** declarar sus propios menús, igual que declara sus
+# respuestas: son datos del doble, no del sistema. Por eso aquí y no en el
+# código de producción.
+MENUS = {
+    "inicio": {
+        "1": "Partida nueva",
+        "2": "Continuar una partida guardada",
+        "3": "Gestionar las partidas guardadas",
+        "4": "Ayuda",
+        "0": "Salir del programa",
+    },
+    "partida": {
+        "1": "Introducir una jugada",
+        "2": "Ver el historial",
+        "3": "Ver el FEN (para copiarlo a otro programa)",
+        "4": "Deshacer la última jugada",
+        "5": "Guardar la partida",
+        "6": "Guardar y empezar otra",
+        "7": "Abandonar la partida",
+        "8": "Ayuda",
+        "0": "Volver al menú principal (la partida se queda como estaba)",
+    },
+    "archivo": {
+        "1": "Guardar la partida actual",
+        "2": "Cargar una partida guardada",
+        "3": "Ver las partidas guardadas",
+        "4": "Borrar una partida guardada",
+        "0": "Volver al juego",
+    },
+}
 
 # ----------------------------------------------------------------------
 # Dobles de prueba
@@ -112,13 +151,13 @@ class VistaFalsa:
             self.escribir(f"  {informe['id']}")
 
     def menu_inicio(self) -> str:
-        return self.pedir_opcion(OPCIONES_INICIO, "Opción")
+        return self.pedir_opcion(MENUS["inicio"], "Opción")
 
     def menu_partida(self) -> str:
-        return self.pedir_opcion(OPCIONES_PARTIDA, "Opción")
+        return self.pedir_opcion(MENUS["partida"], "Opción")
 
     def menu_archivo(self) -> str:
-        return self.pedir_opcion(OPCIONES_ARCHIVO, "Opción")
+        return self.pedir_opcion(MENUS["archivo"], "Opción")
 
     # -- ayuda para las comprobaciones ----------------------------------
     def texto(self) -> str:
@@ -585,7 +624,10 @@ class TestGestionarArchivos:
 
     def test_el_menu_principal_ofrece_gestionar_los_archivos(self):
         vista = VistaFalsa()
-        assert "3" in OPCIONES_INICIO
+        # El "3" es la entrada al menú de archivos. Antes esta comprobación
+        # miraba la tabla de producción (``OPCIONES_INICIO``); ahora mira la del
+        # doble, que es donde vive: la tabla era un dato que ya no leía nadie.
+        assert "3" in MENUS["inicio"]
         assert vista.menu_inicio() == "0"  # sin respuestas, se sale
 
     def test_gestionar_archivos_lista_las_partidas(self, controlador, vista):
@@ -647,34 +689,3 @@ class TestGestionarArchivos:
         controlador.ejecutar()
         assert vista.escrito[-1] == "Hasta la próxima."
 
-
-class TestTablasDeMenus:
-    """Los datos de los menús, que viven en ``views.interfaz``.
-
-    Estas pruebas estaban dentro de la clase de la vista de consola, y se han
-    quedao aquí (y no se han borrado con ella) porque lo que comprueban no es la
-    consola: son las tablas ``OPCIONES_*``, que viven en ``views/interfaz.py`` y
-    que el bucle de menús del controlador sigue usando. Borrarlas habría dejado
-    sin comprobar un fichero que se queda.
-    """
-
-    def test_los_menus_no_dejan_huecos_en_la_numeracion(self):
-        # Un menú que salta del 7 al 9 (que fue lo que pasaba) parece que le
-        # falta una opción, y hace dudar de si hay un error. Se comprueba que
-        # las claves son 1..n seguidas del 0, que es el orden en el que se leen.
-        for nombre, opciones in (
-            ("OPCIONES_INICIO", OPCIONES_INICIO),
-            ("OPCIONES_PARTIDA", OPCIONES_PARTIDA),
-            ("OPCIONES_ARCHIVO", OPCIONES_ARCHIVO),
-        ):
-            numericas = sorted(int(c) for c in opciones if c != "0")
-            expected = list(range(1, len(numericas) + 1))
-            assert numericas == expected, f"{nombre} tiene un hueco: {numericas}"
-
-    def test_la_ayuda_del_juego_es_la_opcion_8(self):
-        # El número concreto no debería ser una decisión arbitraria de cada
-        # archivo: la ayuda se numera la última antes del 0 para que quede claro
-        # que no es una jugada.
-        assert "8" in OPCIONES_PARTIDA
-        assert OPCIONES_PARTIDA["8"] == "Ayuda"
-        assert "9" not in OPCIONES_PARTIDA

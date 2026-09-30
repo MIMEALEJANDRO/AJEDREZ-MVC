@@ -25,7 +25,41 @@ import pytest
 tk = pytest.importorskip("tkinter", reason="esta plataforma no trae tkinter")
 
 from models.enums import Color  # noqa: E402
-from views.ventana import VentanaAjedrez  # noqa: E402
+from views.interfaz import InterfazVista  # noqa: E402
+from views.ventana import SalidaDeConsola, VentanaAjedrez  # noqa: E402
+
+
+class TestElContrato:
+    """El ``Protocol`` tiene que ser cierto, y esto es lo que lo vigila.
+
+    El contrato declaraba 17 métodos (los de la consola y sus tres menús)
+    cuando la única vista que existía implementaba seis. Un ``Protocol`` que su
+    propia implementación incumple no es documentación, es una mentira; y como
+    ``runtime_checkable`` solo comprueba que existan los métodos,
+    ``isinstance`` devolvía ``False`` sin que nada lo delatara.
+
+    Estos dos tests son la red que lo evita: si alguien añade un método al
+    contrato y no lo implementa la pantalla, o al revés, fallan aquí.
+    """
+
+    def test_la_pantalla_cumple_el_contrato_completo(self, ventana):
+        # El que de verdad importa: se instancia y se pregunta.
+        assert isinstance(SalidaDeConsola(ventana), InterfazVista)
+
+    def test_la_pantalla_no_declara_metodos_de_menus(self, ventana):
+        # El otro lado del mismo acuerdo: el contrato no pide menús, porque no
+        # hay ninguna pantalla que los tenga. Si alguien los vuelve a meter sin
+        # una pantalla que los cumpla, esto salta.
+        declarados = set(InterfazVista.__protocol_attrs__)
+        assert declarados == {
+            "escribir",
+            "titulo",
+            "mostrar_mensaje",
+            "mostrar_error",
+            "pedir_confirmacion",
+            "elegir_color",
+        }
+        assert not [m for m in declarados if m.startswith(("menu_", "pedir_jugada", "mostrar_tablero"))]
 
 
 @pytest.fixture
