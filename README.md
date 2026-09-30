@@ -20,9 +20,10 @@ main_ventana.py                      solo configura y arranca
 storage/json_storage.py              el disco (JSON)
 ```
 
-`views/interfaz.py` (el contrato `InterfazVista`) y el bucle de menús del
-controlador siguen en el código, pero **ninguna pantalla los usa ya**. Está
-explicado en [Qué queda sin usar y por qué](#qué-queda-sin-usar-y-por-qué).
+`views/ventana.py` (y sus tres mitades, `ventana_widgets`, `ventana_dibujo` y
+`ventana_eventos`) son la pantalla. El bucle de menús del controlador sigue en el
+código pero **nadie lo llama**, y está anotado en
+[Deuda técnica aceptada](#deuda-técnica-aceptada).
 
 
 ## Puesta en marcha
@@ -123,27 +124,55 @@ Lo que sí comparte con el resto es lo que importa: `models/` no sabe que esto
 existe, `storage/` tampoco, y el controlador no ha tenido que cambiar de forma
 para acomodar la pantalla.
 
-### Qué queda sin usar y por qué
+### Deuda técnica aceptada
 
-Borrar las dos vistas con menús deja código que ya no ejecuta nadie. Se conserva,
-y se apunta aquí para que quede como decisión y no como descuido:
+Borrar la consola y la ventana de menús dejó código que ya no ejecuta nadie. Se
+decidió **no podarlo** y dejarlo como deuda asumida, pero con el coste medido y
+un criterio de salida escrito, para que no sea un olvido sino una decisión.
 
-| Qué | Por qué se queda |
-|---|---|
-| `InterfazVista` (`views/interfaz.py`) | El bucle de menús del controlador está escrito y probado contra él. Si se borrara el contrato, se caerían sus pruebas. |
-| `OPCIONES_INICIO` / `OPCIONES_PARTIDA` / `OPCIONES_ARCHIVO` | Son los datos de esos menús, y viven en el mismo módulo. |
-| `ejecutar` / `jugar` / `gestionar_archivos` del controlador | Mismo motivo: sus pruebas siguen en pie y documentan cómo se conversa con una persona. |
-| `introducir_jugada` | Atajo de `aplicar_jugada` para el bucle de menús. |
-| `FENStorage` | Formato estándar para exportar a otro programa. Ya no se ofrece en la ventana, pero se prueba. |
+**Qué queda exactamente**
 
-**Propuesta de poda** (no aplicada, porque es una decisión de alcance y no un
-detalle): si el proyecto ya no va a recuperar los menús, todo lo de la tabla
-anterior se puede ir en un solo commit —`views/interfaz.py` entero, el bucle de
-menús del controlador y `tests/test_controlador.py` con lo que lo prueba—, y el
-proyecto quedaría con una sola forma de hablar con la persona. El precio sería
-perder unas 70 pruebas que hoy vigilan la traducción de errores y el guardado, así
-que **no lo he hecho**: no es una limpieza, es un recorte de funcionalidad, y
-decide quien lleva el proyecto.
+| Dónde | Qué es | Líneas | Estado |
+|---|---|---|---|
+| `controllers/partida_controller.py` | `ejecutar`, `jugar`, `gestionar_archivos`, `introducir_jugada`, `ofrecer_guardado` | ~200 | escrito y probado, **nadie lo llama** |
+
+**Por qué no se poda**
+
+1. Es la **única documentación ejecutable** de cómo se conversa con una persona a
+   través de la vista. En un proyecto cuyo interés es la arquitectura, borrarlo
+   elimina la capa que hace visible el MVC.
+2. Está **probado** (~45 pruebas), así que no cuesta mantenimiento: no hay que
+   tocarlo, solo ignorarlo.
+3. Las **acciones que envuelve** sí se usan y sí se reusan: `aplicar_jugada`,
+   `guardar`, `cargar`, `deshacer`, `empatar`, `abandonar` son justo lo que llama
+   la ventana y lo que llamaría un rival. La poda no tocaría esas.
+
+**Lo que sí se corrigió, porque no era deuda sino un error**
+
+`InterfazVista` declaraba 17 métodos y la única pantalla que existe implementa 6:
+`isinstance(vista, InterfazVista)` devolvía **`False`**. El propio módulo decía
+que "un `Protocol` que miente es peor que no tener contrato", así que el
+contrato se **redujo a los 6 métodos que la pantalla cumple de verdad**
+(`SalidaDeConsola`). Ahora es cierto, se comprueba con `isinstance`, y hay dos
+pruebas en `tests/test_ventana.py` que lo vigilan.
+
+Las tablas `OPCIONES_INICIO` / `OPCIONES_PARTIDA` / `OPCIONES_ARCHIVO` se
+borraron: describían las etiquetas de menús que ya no se pintan y **no las leía
+nada** del programa, solo sus propias pruebas. Sus datos viven ahora en el doble
+de prueba, que es donde corresponde: un doble declara sus propios datos igual que
+declara sus respuestas.
+
+**Criterio de salida** (cuando se cumpla cualquiera de los dos, se poda en un
+commit propio)
+
+- Aparece una segunda pantalla con menús (una consola, por ejemplo), o
+- el bucle de menús deja de estar probado o empieza a dar falsa confianza
+  (por ejemplo, si un día nadie lo ejecuta y sus pruebas se rompen sin que nadie
+  lo note).
+
+Mientras no pase ninguna de las dos, la deuda está pagada con la documentación
+de arriba.
+
 
 
 ## Cómo se juega
@@ -157,14 +186,29 @@ Lo demás —el FEN y el historial completo— está detrás del botón **Mostra
 que los despliega y los vuelve a recoger. Antes estaban siempre a la vista, que
 es mucha información para lo que se quiere de verdad al mover una pieza.
 
-Para elegir bando, el selector **Juegas con:** del panel. Con "Blancas" o
-"Negras" el tablero se gira para tener tus piezas abajo y **empieza ese bando**;
-con "Los dos colores" no hay bando y se juega la partida entera. Cambiar de bando
-con la partida ya empezada pregunta antes de reiniciarla.
+Para elegir bando, el selector **Juegas con:** del panel. La regla es la del
+ajedrez: **siempre mueven las blancas primero**, y eso no cambia con el bando.
+
+| Bando elegido | Qué pasa |
+|---|---|
+| **Blancas** (el de por defecto) | Se juega `e2e4` y ahí se acaba el turno de la persona: el turno pasa a las negras y no hay rival que mueva. |
+| **Negras** | No se puede mover nada: mueven las blancas y nadie las mueve. El tablero sale atenuado. |
+| **Los dos colores** | No hay bando, así que se juega la partida entera. **Es el único modo que permite practicar de principio a fin.** |
+
+El bando por defecto está en **una línea**, al principio de `views/ventana.py`
+(`BANDO_POR_DEFECTO`), con el porqué escrito al lado. Cambiar de bando con la
+partida empezada **no reinicia nada**: solo cambia a quién le toca el ratón.
+
+Dónde vive la regla de "quién puede mover" está en
+`PartidaController.color_que_juega`, que es el único sitio que la decide. Estaba
+repetida en tres puntos de la ventana (pintar el tablero, aceptar un clic, y el
+aviso de turno), y por eso un cambio de bando podía dejar el tablero diciendo una
+cosa y los clics otra. Ese método es también donde se tocaría el día que haya un
+rival: sería cambiarlo, no reescribir la vista ni el modelo.
 
 Y hay una ayuda en la propia partida (**opción 8** del menú de juego) que
 resume las notaciones. Ese menú es del bucle antiguo de la consola y **no lo
-ofrece la ventana**: la nota está en [Qué queda sin usar](#qué-queda-sin-usar-y-por-qué).
+ofrece la ventana**: la nota está en [Deuda técnica aceptada](#deuda-técnica-aceptada).
 
 El bucle de menús también acepta la jugada escrita a mano:
 ```
@@ -234,9 +278,11 @@ storage/                    Lo único que toca el disco.
   json_storage.py           Implementación en un archivo JSON. La que usa la ventana.
   fen_storage.py            Implementación en archivos .fen. Se conserva, no se ofrece.
 views/
-  interfaz.py               El contrato (Protocol) y las opciones de menú.
-                            Sin pantalla que lo cumpla: ver "Qué queda sin usar".
-  ventana.py                La ventana jugable, de botones. No cumple el contrato.
+  interfaz.py               El contrato (Protocol), texto_del_error.
+  ventana.py                VentanaAjedrez: la clase que junta las tres de abajo.
+  ventana_widgets.py        Construcción de widgets, configuración y bando por defecto.
+  ventana_dibujo.py         Pintar el tablero, el FEN y el historial.
+  ventana_eventos.py        Clics, botones y diálogos.
 controllers/
   partida_controller.py     Une las tres y decide qué hacer.
 tests/                      626 pruebas.
@@ -392,15 +438,13 @@ para una IA es la búsqueda y su cacheo, no más velocidad de generación.
   aceptó a conciencia al dejar una sola forma de arrancar. Si vuelve a hacer
   falta, `PartidaController.aplicar_jugada` y compañía son la puerta: una
   `PartidaView` nueva no tocaría ni las reglas ni el controlador.
-- **Jugar con un solo bando, sin rival, solo deja hacer una de cada dos jugadas.**
-  Es el comportamiento que fija `color_jugador`: si juegas con negras, el
-  controlador no te deja mover las blancas, así que después de tu jugada el
-  turno se te escapa hasta la siguiente. Para practicar está el modo "Los dos
-  colores", que es el único en el que se juega una partida entera. **Aviso, sin
-  cambios aplicados**: el selector arranca en "Blancas", y para una aplicación
-  cuyo fin es practicar reglas eso es un mal punto de partida. Lo razonable sería
-  arrancar en "Los dos colores" (una línea) o pedir el bando al empezar, pero es
-  una decisión de uso y no la he tomado por mi cuenta.
+- **Con un solo bando y sin rival se puede jugar una jugada, y nada más.** Es la
+  consecuencia de que en ajedrez muevan **siempre** las blancas: con Blancas se
+  juega `e2e4` y a partir de ahí el turno es del otro bando, y con Negras no se
+  puede mover nada. Es el reglamento aplicado sin rival, no un descuido. La
+  única forma de practicar una partida entera es elegir "Los dos colores", y
+  quitar este límite es cosa de un rival. El sitio donde se tocaría ya está
+  preparado y es uno solo: `PartidaController.color_que_juega`.
 - Queda código sin uso tras borrar las vistas con menús (el contrato y el bucle
-  de menús del controlador). Ver [Qué queda sin usar y por qué](#qué-queda-sin-usar-y-por-qué).
+  de menús del controlador). Ver [Deuda técnica aceptada](#deuda-técnica-aceptada).
 
