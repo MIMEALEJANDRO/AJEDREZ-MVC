@@ -29,6 +29,30 @@ from views.interfaz import InterfazVista  # noqa: E402
 from views.ventana import SalidaDeConsola, VentanaAjedrez  # noqa: E402
 
 
+def _atributos_del_protocolo(protocolo: type) -> set[str]:
+    """Los nombres que un ``Protocol`` declara, en cualquier versión de Python.
+
+    ``Protocol.__protocol_attrs__`` es la forma oficial, pero **solo existe desde
+    la 3.12**. En la 3.10 y la 3.11 el acceso da ``AttributeError``, que es
+    exactamente lo que pasó en la CI al probar la 3.10 con este archivo.
+
+    El recurso es el atributo oficial cuando existe y, si no, la lista de
+    miembros del propio ``Protocol``. Sale lo mismo en los dos casos **para este
+    contrato**, porque sus seis miembros son métodos definidos con ``def`` y no
+    hay miembros de datos. Por eso el recurso va aquí y no en
+    ``views/interfaz.py``: es una compatibilidad de la comprobación, no una
+    diferencia en el contrato.
+    """
+    declarados = getattr(protocolo, "__protocol_attrs__", None)
+    if declarados is not None:
+        return set(declarados)
+    return {
+        nombre
+        for nombre, valor in vars(protocolo).items()
+        if not nombre.startswith("_") and (callable(valor) or isinstance(valor, property))
+    }
+
+
 class TestElContrato:
     """El ``Protocol`` tiene que ser cierto, y esto es lo que lo vigila.
 
@@ -50,7 +74,7 @@ class TestElContrato:
         # El otro lado del mismo acuerdo: el contrato no pide menús, porque no
         # hay ninguna pantalla que los tenga. Si alguien los vuelve a meter sin
         # una pantalla que los cumpla, esto salta.
-        declarados = set(InterfazVista.__protocol_attrs__)
+        declarados = _atributos_del_protocolo(InterfazVista)
         assert declarados == {
             "escribir",
             "titulo",
