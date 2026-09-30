@@ -387,29 +387,27 @@ class Partida:
         self.motivo = f"Las {self.turno.nombre_legible.lower()} abandonaron"
         self.ganador = self.turno.contrario
 
-    def reiniciar(self, turno: Color = Color.BLANCO) -> None:
+    def reiniciar(self) -> None:
         """Empieza una partida nueva desde la posición inicial.
 
         Se reinicia llamando al propio ``__init__``: es la forma de garantizar
         que la partida nueva tiene *exactamente* el mismo estado que una recién
         creada, sin tener que acordarse de poner a cero cada atributo.
 
-        ``turno`` es a quién le toca la primera jugada, y por defecto son las
-        blancas, como en el ajedrez normal. Existe el parámetro para el caso de
-        practicar con un solo bando: si quien juega elige negras, la partida tiene
-        que **empezar con las negras**, porque si no el turno sería de las blancas
-        y ninguna jugada suya sería legal (el controlador rechaza las del color
-        contrario), con lo que la partida quedaría bloqueada desde el primer
-        momento.
+        **Siempre empiezan las blancas.** No es un parámetro a propósito: en
+        ajedrez es una regla, no una preferencia de quien abre el programa. El
+        bando con el que juega la persona es cosa de la aplicación (el
+        controlador lo sabe), y elijiendo negras no se puede mover nada hasta
+        que mueva el otro bando, que es exactamente como funciona el ajedrez.
+        Para practicar los dos bandos en la misma partida está el modo "los dos
+        colores", que es lo que no impone ningún bando.
 
-        Ojo con lo que NO se toca: ``numero_movimiento`` sigue valiendo 1. En el
-        FEN, el número de jugada es la de la pareja blanca+negra, así que si
-        empiezan las negras, tras su primera jugada el contador sube a 2. Es lo
-        que dice el estándar y no merece la pena inventar otra cosa.
+        Una posición con el turno de las negras sí se puede *cargar* (un FEN con
+        ``b``), pero eso es una posición que viene de fuera, no una partida que
+        empieza aquí.
         """
         self.__init__()
-        if turno is not Color.BLANCO:
-            self.turno = turno
+
 
     def esta_terminada(self) -> bool:
         """True si la partida ya no admite más jugadas."""

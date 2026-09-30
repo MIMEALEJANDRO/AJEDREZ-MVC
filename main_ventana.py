@@ -4,8 +4,10 @@ Esta es **la única** forma de arrancar. Antes había tres (la consola, la venta
 de menús y esta) y se elegía una al arrancar; ahora no hay nada que elegir.
 
 La vista es ``VentanaAjedrez`` y **no** cumple ``InterfazVista``: no tiene
-menús. En lugar de preguntar, la pantalla llama directamente a los métodos del
-controlador cuando alguien pulsa un botón o hace clic en una casilla
+menús. Quien sí lo cumple es ``SalidaDeConsola``, el adaptador que le pasa el
+controlador (ver ``views/interfaz.py``). En lugar de preguntar, la pantalla llama
+directamente a los métodos del controlador cuando alguien pulsa un botón o hace
+clic en una casilla
 (``aplicar_jugada``, ``guardar``, ``cargar``, ``deshacer``, etc.). El controlador
 ya estaba preparado: lo único que hizo falta fue ``aplicar_jugada(texto)`` para
 que no tuviera que pasar por ``pedir_jugada()``.

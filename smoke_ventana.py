@@ -155,21 +155,25 @@ def elegir(ventana: VentanaAjedrez, valor: str) -> None:
     ventana._al_cambiar_color()
 
 
+def texto_de_aviso(ventana: VentanaAjedrez) -> list[str]:
+    """Las líneas del panel de avisos, para poder buscar texto dentro."""
+    return ventana.avisos.get("1.0", "end").splitlines()
+
+
 def silenciar_dialogos() -> None:
     """Contesta sola a los diálogos, para que la prueba no se quede esperando.
 
-    Hace falta desde que cambiar de bando con la partida empezada pregunta si se
-    reinicia: en una prueba de humo no hay nadie que conteste, y un
-    ``askyesno`` sin responder deja el script colgado. Se sustituyen solo las dos
-    funciones que se usan (``askyesno`` y ``askstring``), no la clase entera.
+    Hace falta desde que cambiar de bando con la partida empezada puede preguntar
+    cosas: en una prueba de humo no hay nadie que conteste, y un ``askyesno`` sin
+    responder deja el script colgado.
 
-    Se contestan con "sí" y con un nombre fijo, que es lo que hace falta para que
-    las comprobaciones sean estables.
+    Se parchea ``tkinter.messagebox`` y no el módulo de la ventana que lo
+    importa, porque ese módulo se mueve con cada refactor de la vista y esto no
+    tiene por qué enterarse.
     """
-    import views.ventana as modulo
+    tk.messagebox.askyesno = lambda *argumentos, **opciones: True
+    tk.messagebox.askstring = lambda *argumentos, **opciones: "partida de prueba"
 
-    modulo.messagebox.askyesno = lambda *argumentos, **opciones: True
-    modulo.messagebox.askstring = lambda *argumentos, **opciones: "partida de prueba"
 
 
 # ---------------------------------------------------------------------------
@@ -252,10 +256,8 @@ def parte_los_dos_colores(ventana: VentanaAjedrez) -> None:
     clic_en_casilla_de_pantalla(ventana, 4, 6)  # e2
     comprobar(ventana.origen == Posicion(4, 1), f"se elige el peón de e2 ({ventana.origen})")
     clic_en_casilla_de_pantalla(ventana, 4, 4)  # e4
-    comprobar(
-        [m.notacion for m in ventana.controlador.partida.historial] == ["e2-e4"],
-        "y se juega e2-e4",
-    )
+    jugadas = [m.notacion for m in ventana.controlador.partida.historial]
+    comprobar(jugadas == ["e2-e4"], f"y se juega e2-e4 (jugadas: {jugadas})")
     clic_en_casilla_de_pantalla(ventana, 4, 1)  # e7
     comprobar(
         ventana.origen == Posicion(4, 6), f"se elige el peón de e7 ({ventana.origen})"
@@ -304,44 +306,63 @@ def parte_elegir_color(ventana: VentanaAjedrez) -> None:
     )
     comprobar(simbolo == "♜", f"abajo a la izquierda se ve la torre negra (se ve {simbolo!r})")
 
-    # Lo que cambió con el arreglo: con negras **empiezan las negras**. Antes se
-    # giraba la vista pero el turno se quedaba en las blancas y la partida
-    # quedaba bloqueada (ninguna jugada era legal).
+    # Lo que decide este bando NO es el turno: en ajedrez siempre mueven las
+    # blancas primero, y eso es una regla, no una preferencia. Elegir negras
+    # cambia el lado del tablero y a quién le toca el ratón, pero no quién mueve.
+    comprobar(ventana.controlador.color_jugador is Color.NEGRO, "el bando del jugador es negro")
     comprobar(
-        ventana.controlador.color_jugador is Color.NEGRO, "el bando del jugador es negro"
+        ventana.controlador.partida.turno is Color.BLANCO,
+        "pero el turno es el de las blancas: siempre empiezan las blancas",
     )
     comprobar(
-        ventana.controlador.partida.turno is Color.NEGRO,
-        "y con negras empieza el turno de las negras",
+        ventana.controlador.color_que_juega() is None,
+        "y con negras sin rival no puede mover nadie",
     )
-    comprobar(atenuado(ventana) == 0, f"el tablero se ilumina: es el turno de negras ({atenuado(ventana)})")
-
-    # Se puede mover negro de entrada, sin tener que esperar a que mueva nadie.
-    # En el tablero girado las columnas van del revés: la "e" es la cuarta desde
-    # la derecha (columna 3) y la fila 7 es la segunda desde abajo (fila 6).
-    clic_en_casilla_de_pantalla(ventana, 3, 6)  # e7
-    comprobar(
-        ventana.origen == Posicion(4, 6),
-        f"el peón de e7 se puede pulsar de entrada (seleccionó {ventana.origen})",
-    )
-    clic_en_casilla_de_pantalla(ventana, 3, 4)  # e5
-    comprobar(
-        [m.notacion for m in ventana.controlador.partida.historial] == ["e7-e5"],
-        "y se juega e7-e5 con el mismo clic",
-    )
-    comprobar(
-        ventana.etiqueta_ultima.cget("text") == "Negras e7-e5",
-        f"el panel dice 'Negras e7-e5' ({ventana.etiqueta_ultima.cget('text')!r})",
-    )
-
-    # Y ahora sí es el turno de las blancas: el tablero se atenúa y el peón de e7
-    # ya no se puede tocar, porque no es el turno del bando elegido.
     comprobar(
         atenuado(ventana) == 64,
-        f"tras la jugada de negras se atenúa: es el turno de las blancas ({atenuado(ventana)})",
+        f"el tablero se atenúa entero, porque no es tu turno ({atenuado(ventana)})",
     )
+    # El peón de e7 se ve abajo del todo (columna 3 = la "e" girada, fila 6) pero
+    # no se puede pulsar: no es el turno del bando elegido.
     clic_en_casilla_de_pantalla(ventana, 3, 6)  # e7
-    comprobar(ventana.origen is None, "no se puede mover negro cuando es el turno de blanco")
+    comprobar(
+        ventana.origen is None,
+        "con negras sin rival el peón de e7 no se puede pulsar (mueven las blancas)",
+    )
+    # Ni por el atajo de la partida: el controlador lo rechaza con el aviso.
+    comprobar(
+        ventana.controlador.aplicar_jugada("e7e5") is False,
+        "y la jugada de las negras se rechaza con el aviso de turno",
+    )
+    comprobar(
+        any("no es su turno" in linea.lower() for linea in texto_de_aviso(ventana)),
+        f"con el aviso de 'No es su turno...' ({texto_de_aviso(ventana)[-1]!r})",
+    )
+
+    # Volviendo a blancas, el turno vuelve a ser jugable: una jugada y se acaba.
+    elegir(ventana, "blancas")
+    comprobar(ventana.girada is False, "con blancas el tablero queda derecho")
+    comprobar(
+        ventana.controlador.color_que_juega() is Color.BLANCO, "y con blancas se puede mover"
+    )
+    comprobar(atenuado(ventana) == 0, f"el tablero se ilumina ({atenuado(ventana)})")
+    clic_en_casilla_de_pantalla(ventana, 4, 6)  # e2
+    comprobar(ventana.origen == Posicion(4, 1), f"se elige e2 ({ventana.origen})")
+    clic_en_casilla_de_pantalla(ventana, 4, 4)  # e4
+    jugadas = [m.notacion for m in ventana.controlador.partida.historial]
+    comprobar(jugadas == ["e2-e4"], f"y se juega e2-e4 (jugadas: {jugadas})")
+    comprobar(
+        ventana.etiqueta_ultima.cget("text") == "Blancas e2-e4",
+        f"el panel dice 'Blancas e2-e4' ({ventana.etiqueta_ultima.cget('text')!r})",
+    )
+    comprobar(
+        ventana.controlador.color_que_juega() is None,
+        "y después de esa jugada ya no puede mover más (turno del otro bando)",
+    )
+    comprobar(
+        atenuado(ventana) == 64,
+        f"el tablero se atenúa: es el turno de las negras ({atenuado(ventana)})",
+    )
 
 
 def parte_panel_fen(ventana: VentanaAjedrez) -> None:

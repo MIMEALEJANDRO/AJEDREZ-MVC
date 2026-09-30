@@ -239,19 +239,20 @@ class PartidaController:
 
         ``color`` es con qué bando se va a jugar. Si no se indica, se pregunta a
         la vista (que es lo que hace el bucle de menús). La ventana jugable lo
-        pasa explícitamente, porque ahí el bando ya está elegido en un selector
-        y no hay nada que preguntar.
+        pasa explícitamente, porque ahí el bando ya está elegido en un selector y
+        no hay nada que preguntar.
 
-        Lo importante de este método es que **el turno inicial y el bando tienen
-        que ser coherentes entre sí**. Si quien juega con negras, la partida
-        empieza con las negras: si empezara con las blancas, el controlador
-        rechazaría la jugada de las negras por no ser su turno y la partida
-        quedaría bloqueada desde el primer movimiento. Ese era el bug, y por eso
-        el turno se le pasa a ``Partida.reiniciar`` en vez de dejarlo puesto a
-        mano después.
+        El turno inicial **siempre es el de las blancas**, porque es una regla del
+        ajedrez y no una preferencia. La consecuencia, y es la que hay que tener
+        clara, es que con un bando elegido solo se puede jugar la jugada que le
+        corresponde a ese bando: quien juegue con blancas hace su primera jugada y
+        a partir de ahí el turno es del otro bando, y quien juegue con negras no
+        puede mover nada hasta que el otro bando mueva. Para practicar una
+        partida entera está el modo "los dos colores", que es el único que no
+        impone bando.
 
-        Con ``None`` ("los dos colores") no hay bando, así que se empieza como
-        siempre, con las blancas.
+        Con ``None`` ("los dos colores") no hay bando, así que quien tenga el
+        turno puede mover sea el que sea.
         """
         if color is None:
             color = self.vista.elegir_color()
@@ -259,7 +260,52 @@ class PartidaController:
         # Se olvida la clave guardada: es otra partida y no debe reemplazar a
         # la anterior en el almacenamiento.
         self.clave_guardada = None
-        self.partida.reiniciar(turno=color if color is not None else Color.BLANCO)
+        self.partida.reiniciar()
+
+    # ------------------------------------------------------------------
+    # Quién puede mover
+    # ------------------------------------------------------------------
+
+    def color_que_juega(self) -> Color | None:
+        """El color que puede mover una pieza ahora mismo, o ``None``.
+
+        Este es **el** sitio donde se decide quién tiene el turno de verdad, y
+        está aquí y no en la vista a propósito: la vista solo dibuja y recoge
+        clics, pero "quién puede mover" es una regla de la aplicación (el modelo
+        permite jugar con el color que sea).
+
+        Las tres reglas, en una sola función:
+
+        * si la partida terminó, no mueve nadie;
+        * si no hay bando elegido (los dos colores), mueve quien tenga el turno;
+        * si hay bando, mueve ese bando **y solo si le toca**.
+
+        Lo último es lo que hace que con un solo jugador y un bando elegido se
+        pueda jugar exactamente una jugada: al mover, el turno pasa al otro bando
+        y ya no puede volver hasta que ese bando se mueva.
+
+        Dónde se arreglaría el día que haya un rival: aquí. Un motor que responde
+        por el otro bando es cambiar esta función (y quién mueve en el hilo
+        correspondiente), no reescribir la vista ni el modelo.
+        """
+        partida = self.partida
+        if partida.esta_terminada():
+            return None
+        if self.color_jugador is None:
+            return partida.turno
+        return partida.turno if partida.turno is self.color_jugador else None
+
+    def puede_mover_pieza(self, pieza: Pieza | None) -> bool:
+        """True si esa pieza se puede mover ahora mismo.
+
+        Es la versión "de una pieza" de :meth:`color_que_juega`, y la usa la
+        ventana para decidir si un clic selecciona algo. Al pasar por aquí, la
+        lista de reglas no puede quedar desincronizada con lo que se ve.
+        """
+        if pieza is None:
+            return False
+        quien = self.color_que_juega()
+        return quien is not None and pieza.color is quien
 
     # ------------------------------------------------------------------
     # Jugadas

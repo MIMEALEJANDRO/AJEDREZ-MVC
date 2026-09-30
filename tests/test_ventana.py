@@ -102,62 +102,54 @@ class TestBandoYGiro:
         assert ventana.color is None
         assert ventana.girada is False
 
-    def test_con_negras_empiezan_las_negras(self, ventana):
-        # El bug: se giraba la vista pero el turno se quedaba en las blancas y
-        # la partida quedaba bloqueada.
-        ventana.opciones_color.set("negras")
-        ventana._al_cambiar_color()
-        assert ventana.controlador.partida.turno is Color.NEGRO
-
-    def test_con_negras_se_puede_hacer_la_primera_jugada(self, ventana):
+    def test_con_negras_no_se_puede_mover_nada(self, ventana):
+        # Elegir Negras sin rival: mueven las blancas y nadie las mueve, así que
+        # no hay jugada posible. El tablero sale atenuado, y eso lo comprueba el
+        # humo de la ventana; aquí se comprueba la regla.
         ventana.opciones_color.set("negras")
         ventana._al_cambiar_color()
         control = ventana.controlador
-        assert control.aplicar_jugada("e7e5") is True
-        assert len(control.partida.historial) == 1
+        assert control.color_jugador is Color.NEGRO
+        assert control.partida.turno is Color.BLANCO
+        assert control.color_que_juega() is None
+        assert control.aplicar_jugada("e7e5") is False
 
-    def test_partida_nueva_mantiene_el_bando_y_el_turno(self, ventana):
-        ventana.opciones_color.set("negras")
-        ventana._al_cambiar_color()
+    def test_con_blancas_se_juega_una_jugada_y_se_acaba_el_turno(self, ventana):
+        # El caso bueno, y el que se ve al abrir el programa: con Blancas se juega
+        # la primera jugada. Después el turno es del otro bando y la segunda no
+        # entra. Es el límite del modo de un jugador.
+        ventana.controlador.aplicar_jugada("e2e4")
+        ventana._refrescar()
+        assert ventana.controlador.partida.turno is Color.NEGRO
+        assert ventana.controlador.color_que_juega() is None
+        assert ventana.controlador.aplicar_jugada("e7e5") is False
+
+    def test_partida_nueva_vuelve_a_dejarse_mover(self, ventana):
+        # Tras una jugada (y solo esa), "Partida nueva" devuelve el turno.
+        ventana.controlador.aplicar_jugada("e2e4")
         ventana._nueva_partida()
         control = ventana.controlador
-        assert control.color_jugador is Color.NEGRO
-        assert control.partida.turno is Color.NEGRO
         assert control.partida.historial == []
-        assert control.aplicar_jugada("e7e5") is True
+        assert control.partida.turno is Color.BLANCO
+        assert control.aplicar_jugada("e2e4") is True
 
-    def test_cambiar_de_bando_con_partida_empezada_pregunta(self, ventana, monkeypatch):
-        # Sin el aviso, cambiar el bando a mitad de partida perdería las jugadas
-        # sin avisar. Se comprueba que se pregunta, y que si se dice que no se
-        # vuelve al bando anterior (included el botón de radio).
-        ventana.controlador.aplicar_jugada("e2e4")
-        assert ventana.controlador.partida.historial
-
-        preguntas: list[str] = []
-
-        def no(*args, **kwargs):
-            preguntas.append(args[1] if len(args) > 1 else kwargs.get("message", ""))
-            return False
-
-        monkeypatch.setattr("views.ventana.messagebox.askyesno", no)
-        ventana.opciones_color.set("negras")
+    def test_cambiar_de_bando_no_toca_la_partida(self, ventana):
+        # El turno inicial ya no depende del bando (siempre las blancas), así que
+        # cambiar de bando a mitad de partida no reinicia nada ni pregunta: solo
+        # cambia a quién le toca el ratón. Antes sí reiniciaba, y por eso había un
+        # diálogo de confirmación que ya no hace falta.
+        ventana.opciones_color.set("ambas")
         ventana._al_cambiar_color()
-
-        assert preguntas, "no se preguntó por el cambio de bando"
-        assert ventana.color is Color.BLANCO
-        assert ventana.opciones_color.get() == "blancas"
-        assert len(ventana.controlador.partida.historial) == 1
-
-    def test_cambiar_de_bando_aceptando_reinicia_la_partida(self, ventana, monkeypatch):
         ventana.controlador.aplicar_jugada("e2e4")
-        monkeypatch.setattr("views.ventana.messagebox.askyesno", lambda *a, **k: True)
+        ventana.controlador.aplicar_jugada("e7e5")
+        assert len(ventana.controlador.partida.historial) == 2
+
         ventana.opciones_color.set("negras")
         ventana._al_cambiar_color()
         control = ventana.controlador
         assert control.color_jugador is Color.NEGRO
-        assert control.partida.turno is Color.NEGRO
-        assert control.partida.historial == []
-        assert control.clave_guardada is None
+        assert len(control.partida.historial) == 2
+        assert control.partida.turno is Color.BLANCO
 
 
 # ---------------------------------------------------------------------------
@@ -244,9 +236,12 @@ class TestUltimaJugada:
         assert ventana.etiqueta_ultima.cget("text") == "Todavía no hay jugadas"
         assert ventana.controlador.partida.historial == []
 
-    def test_con_negras_dice_negras(self, ventana):
-        ventana.opciones_color.set("negras")
-        ventana._al_cambiar_color()
-        ventana.controlador.aplicar_jugada("e7e5")
-        ventana._refrescar()
-        assert ventana.etiqueta_ultima.cget("text") == "Negras e7-e5"
+    def test_con_los_dos_colores_dice_el_color_de_quien_movio(self, ambos):
+        # La etiqueta dice quién movió, que se deduce del turno. En "los dos
+        # colores" se juega entera, así que se ven los dos bandos.
+        ambos.controlador.aplicar_jugada("e2e4")
+        ambos._refrescar()
+        assert ambos.etiqueta_ultima.cget("text") == "Blancas e2-e4"
+        ambos.controlador.aplicar_jugada("e7e5")
+        ambos._refrescar()
+        assert ambos.etiqueta_ultima.cget("text") == "Negras e7-e5"
